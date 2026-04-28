@@ -1,0 +1,82 @@
+UVIS telecon Friday Feb 13
+
+Do we need FULLY_INSIDE_FLAG? Ask Amanda.
+What is "PHI"? Todd will investigate.
+We stopped at p.14 of Michael's presentation
+
+Do UVIS raw counts ever go above 32767?
+How do we handle null values in calibrated (float32) and raw (int16)?
+- Greg is not fond of -1000, but NaN has issues too.
+
+We need an HDU for the background subtraction
+- It might have an extra time dimension.
+
+
+From Zoom AI
+
+Meeting assets for PDART UVIS Team Meeting are ready!
+
+Meeting summary 
+
+
+Quick recap
+
+The meeting focused on discussing the structure and organization of FITS files for UVIS data products, with Mark presenting a proposal for file layout and Michael sharing a complementary presentation with HTML slides. The team debated various technical details including how to handle windowed data, the representation of null values, and the inclusion of calibration factors and background arrays. A significant portion of the discussion centered around the proper definition and calculation of subspacecraft latitude, with Mark agreeing to create clarifying diagrams to help resolve the geometric distinctions. The team also addressed the need to standardize geometry calculations across different data domains, with Mark taking the lead on generating backplane information while other team members would focus on combining raw data with geometric calculations into final FITS products.
+
+Next steps
+
+Matthew: Contact Lyle (PDS Atmosphere Node) to clarify reasons for previous FITS file structure decisions, especially regarding table vs array usage.
+Michael: Review the dataset to determine how many observations have multiple windows, and analyze the structure of subwindow data; confirm if data outside windows is always zero and distinguish between insensitive and windowed arrays.
+Mark: Create and circulate a short memo with drawings/pictures to clarify the distinction (or lack thereof) between different definitions of subspacecraft latitude/longitude (centric vs. graphic) and propose agreed-upon definitions for use in the FITS files.
+Todd: Look up and define the quantity "phi" (requested in geometry), clarify its meaning, and propose a better/descriptive name for it; send email to group with definition and proposed name.
+Michael: Write a small "mapper" script to allow Todd's pipeline to ingest Bob's pre-existing calibrated products for the rings domain.
+Matthew: Schedule a follow-up telecon (after Mark's return) to continue discussion of FITS file structure and unresolved issues.
+Michael: Combine and synthesize team contributions for the annual report and send to Matthew by Monday (or next week).
+Matthew: Send out the AI summarizer output to Michael when available.
+Michael & Matthew: Organize a telecom with Amanda to discuss and define a default calibration approach for icy moons data, including background subtraction and documentation of caveats.
+Todd (with Michael's support): Develop/execute the pipeline to combine raw data, calibrated data, and Mark-generated geometry into final FITS files for each domain, using provided software modules.
+Mark: Generate all geometric backplanes for inclusion in final FITS products; compare with Bob's existing calculations to resolve any discrepancies.
+All domain leads (e.g., Josh, Todd, Amanda, etc.): Consider providing default calibrated products for their subdomains, with documented caveats, for inclusion in the pipeline.
+Summary
+
+FITS File Proposal Presentation Format
+
+The team discussed the presentation format for a FITS file format proposal, with Michael offering a HTML presentation version alongside Mark's PDF. They clarified that the example file used was a random Titan file, and Michael noted he had made some corrections to his first version to fix confusion between raw counts and primary data. The discussion focused on finalizing the list of geometric quantities for backplanes and determining the optimal organization of FITS files, with Mark explaining that while there are multiple ways to embed data, they had chosen this format for the proposal. Michael also mentioned that while Titan's atmospheric load restrictions influenced their design decisions, Mark and Matt, as PDS leaders from the Rings Node, believed they could make more flexible data layout choices.
+
+FITS File Structure Discussion
+
+The team discussed the structure of FITS files and data organization, with Mark proposing to place calibrated data cubes in the primary HDU to match user expectations. They addressed concerns about index ordering, with Mark noting that Fitch uses Fortran indexing, which differs from C indexing. The group also discussed the inclusion of raw data products and calibration factors in the files. Matthew suggested consulting Lyle about any specific requirements for the current data structure.
+
+FITS Header Structure and Parameters
+
+Mark and Michael discussed the structure and content of FITS headers, focusing on how data is organized in three-dimensional arrays and the use of specific parameters to describe observations. They clarified the meaning of certain header elements, such as bitpix and n-axis, and explained the concept of additional HDUs using the 'EXTEND' keyword. Mark also addressed the question of zeros in the UVIS data, noting that this topic would be covered later. They briefly touched on the inclusion of parameters like observation time, spacecraft clock time, and windowing information, and discussed the potential addition of geometric parameters like slit angle. Mark emphasized the need for a formal definition of certain parameters to ensure consistency among team members.
+
+Slit Angle Data Product Discussion
+
+The team discussed the inclusion of slit angle information in data products, with Amanda and Mark exploring whether it was necessary for IC satellite observations. Greg suggested that instrument configuration parameters should be moved to a separate HDU for better accessibility, particularly for programmatic access. The group also considered whether to include windowed or unwindowed data in the products, with Mark proposing to save only the windowed data to reduce file sizes and better align with user expectations.
+
+Windowed Data File Naming Protocol
+
+The team discussed handling windowed data products, particularly focusing on how to store and archive data with multiple windows. They agreed that each window should be saved as a separate file with an A or B suffix, maintaining consistency in file naming while accommodating observations with multiple windows. Mark confirmed that PDS rules would not be violated by this approach, as each file would have a unique Lid identifier. The team also discussed the need for Greg to review how this would be implemented in the calibration process.
+
+Handling Missing Data in FITS
+
+The team discussed handling multiple windows in data products, noting that this scenario occurs rarely (around 0.005% of the time). They examined the structure of HDUs (Header Data Units) in data files, particularly focusing on image arrays and their dimensions. Greg raised concerns about representing missing data in FITS files, questioning whether modern implementations support NaN values. Michael confirmed that double precision (-32) and single precision (-64) can represent NaN in recent implementations, though this is not yet standardized in FITS. The team agreed to further discuss how to identify and handle null values in both raw and calibrated products.
+
+Calibration Matrix and Data Representation
+
+The team discussed the calibration matrix and data representation in their products. Mark raised a concern about the data being stored as integers instead of floating-point numbers, which Greg and Emilie agreed to investigate further. They debated whether the calibration factor array should match the dimensions of the data product, with Greg suggesting the possibility of including both windowed and unbinned versions. The group also discussed the importance of recording background subtraction information in the product, as this could be crucial for recovering calibration data in the future.
+
+Data Product Structure Discussion
+
+Mark and Emilie discussed the structure of data products, with Emilie mentioning an email from Josh Elliott explaining their choice to display data structure based on Maven IUVS. Mark clarified the dimensions of quantities in the data, explaining that NX is wavelength, NZ is time sampling, and NT refers to finer time sampling. They discussed the need to agree on selection criteria for which bodies' information to generate, with Mark suggesting including all bodies in the field of view and potentially always including Saturn. Greg pointed out that sometimes the target body is not in the field of view, and more discussion was deemed necessary on this topic.
+
+Subspacecraft Latitude Calculation Discussion
+
+The team discussed the definition and calculation of subspacecraft latitude, with Robert and Mark clarifying that there are two different methods: one using the surface normal vector and another along the line from the center to the spacecraft. They agreed to table this discussion for further clarification, as Mark proposed creating visual aids to explain the different latitude definitions. The group also touched on other spacecraft geometry calculations, including center phase angle and projected diameter, before Mark announced his upcoming vacation and suggested scheduling another meeting to continue the discussion.
+
+Data Processing and Geometry Review
+
+The team discussed action items and responsibilities for data processing and geometry calculations. Mark agreed to create a memo with pictures to clarify subspace definitions, while Todd will look up and define the "phi" quantity and propose a better name. Michael offered to provide Python modules for data processing, with Todd executing them to create FITS files. The team also discussed the need for default calibrations for different data types, with Michael suggesting that subdomain specialists produce data with default settings and documented caveats. Matthew agreed to send out a poll for the next meeting after Mark's return.
+
+

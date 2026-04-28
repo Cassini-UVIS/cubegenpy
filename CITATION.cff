@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use cubegenpy in your research, please cite it using the metadata below."
+title: "cubegenpy: build PDS4-compliant FITS cubes for Cassini UVIS observations"
+authors:
+  - family-names: "Aye"
+    given-names: "K.-Michael"
+    affiliation: "Freie Universität Berlin"
+    orcid: "https://orcid.org/0000-0002-4088-1928"
+abstract: >-
+  Python tool that combines raw Cassini UVIS PDS3 data, calibration matrices,
+  and externally-computed SPICE-derived geometry into a single archive-ready
+  PDS4 FITS product. Successor to the IDL cube_generator. Built on top of
+  pyuvis and planetarypy.
+version: "0.1.0"
+date-released: "2026-04-28"
+license: Apache-2.0
+url: "https://github.com/Cassini-UVIS/cubegenpy"
+repository-code: "https://github.com/Cassini-UVIS/cubegenpy"
+keywords:
+  - "Cassini"
+  - "UVIS"
+  - "FITS"
+  - "PDS4"
+  - "planetary science"
