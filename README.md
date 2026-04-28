@@ -15,8 +15,9 @@ input.
 
 ## Status
 
-**Scaffolding only.** See [`PORT_PLAN.md`](./PORT_PLAN.md) for what's
-ported, what's pending, and what's deliberately out of scope.
+**Scaffolding only.** See [`docs/index.qmd`](./docs/index.qmd) for the
+IDL→Python translation map, the architectural delegation to `pyuvis`,
+and the phase plan.
 
 ## Install (once implemented)
 
@@ -72,15 +73,12 @@ Mirrors Mark Showalter's 2026-02 proposal — see
 | `RING_GEOM` | BINTABLE | Ring backplanes |
 | `KERNELS` | TABLE (ASCII) | SPICE kernels used to compute geometry |
 
-## Architecture and roadmap
-
-- [`PORT_PLAN.md`](./PORT_PLAN.md) — what maps from the IDL `cube_generator`
-  to which Python module, and which pieces come from `pyuvis` instead
-  of being ported.
-
 ## Documentation
 
-(Docs site to be set up — same Quarto/quartodoc pattern as `pyuvis`.)
+- [`docs/index.qmd`](./docs/index.qmd) — full IDL → Python translation
+  map, architectural delegation, and phase plan. Renders as a Quarto
+  page; will become the homepage of the docs site once the Quarto
+  site is wired up (same pattern as `pyuvis`).
 
 ## Citation
 

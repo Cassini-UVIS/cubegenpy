@@ -1,0 +1,178 @@
+---
+title: "cubegenpy"
+subtitle: "Python successor to the IDL `cube_generator` — an IDL → Python translation map"
+author: "K.-Michael Aye"
+date: 2026-04-28
+toc: true
+toc-depth: 3
+---
+
+## What this page is
+
+A single document that answers two questions for anyone reading the code:
+
+1. **For each `.pro` file in the IDL `cube_generator` — what's the Python plan?** Port, replace with a pre-existing `pyuvis` capability, drop because it's GUI / IDL-specific, or defer to a later phase?
+2. **What does cubegenpy own vs. delegate?** Specifically: data I/O is delegated to `pyuvis`, geometry is provided as input by the upstream pipeline (Mark Showalter's backplanes), and SPICE kernel handling lives outside this tool.
+
+Source of the IDL files being translated:
+`~/Dropbox/Documents/01_projects/uvis_pdart/code/tools/cube_generator/`
+(36 `.pro` files, 6649 LOC).
+
+::: {.callout-note}
+**Status: scaffolding only.** No functional Python code yet — only the
+public API stub `cubegenpy.build_cube(...)` raising `NotImplementedError`.
+This document is the contract for what the implementation will look like.
+:::
+
+## Source-of-data delegation
+
+cubegenpy does not re-implement things `pyuvis` already does well, and it
+does not compute geometry or manage SPICE kernels.
+
+| Concern | IDL home (cube_generator) | Python home |
+|---|---|---|
+| Read PDS3 DAT + LBL | `cg_feuv_reader.pro`, `open_pds_file.pro` | `pyuvis.io.PDSReader`, `pyuvis.io.UVPDS` |
+| Wavelength table | `uvis_wl.sav` | `pyuvis.io.UVPDS.wavelengths` |
+| HSP sensitivity | `cg_get_fuv_red_patch.pro` | `pyuvis.hsp_sensitivity` |
+| Flat-fielding (AJS / Steffl) | `cg_read_ajs_flf.pro`, `cg_bin_win_flatfield.pro` | `pyuvis.calib.steffl` |
+| Flat-fielding (Greg / Spica) | `cg_read_spica_ff_data.pro` | `pyuvis.calib.greg` |
+| SCLK conversion | `cg_convert_sclk.pro` | `spiceypy.sct2e` (called by upstream geometry pipeline) |
+| Geometry / Geometer engine | `cg_geometer_engine.pro` (external) | **Provided as input** — Mark's pipeline |
+| SPICE kernel mgmt | `cassini_spice_kernel_list_v2.pro` (external) | **Provided as input** — kernel list passed in, written into the `KERNELS` HDU verbatim |
+| File fetch via PDS | `cg_get_filename.pro`, `get_file_location.pro` | `planetarypy.catalog.fetch_product` (via pyuvis) |
+
+## IDL `.pro` → Python destination
+
+Every file in the source IDL project, with the chosen disposition.
+
+### Algorithm core (port)
+
+| IDL file | LOC | Python target |
+|---|---:|---|
+| `cube_single.pro` | 1046 | `cubegenpy.build.build_cube` — the algorithm core |
+| `cg_create_pass_struct.pro` | 203 | `cubegenpy.config.BuildConfig` (frozen dataclass) |
+| `cg_settings_print.pro` | 94 | `BuildConfig.__repr__` / `__str__` |
+| `cg_init_structures_dp.pro` | 137 | Replaced by FITS HDU builders in `cubegenpy.fits_writer` |
+| `cg_int1.pro` | 76 | Inline helper in `cubegenpy.utils` if still needed |
+
+### Small numerical / data utilities (port)
+
+| IDL file | Python target |
+|---|---|
+| `cg_interpolate_nans.pro`, `cg_interpolate_nans2.pro` | `cubegenpy.utils.interpolate_nans` (pick the better of the two) |
+| `cg_shrink.pro` | `cubegenpy.utils.shrink` |
+| `cg_enlarg.pro` | `cubegenpy.utils.enlarge` |
+| `cg_attget.pro` | `cubegenpy.utils.attr_get` |
+| `cg_xerox.pro` | `cubegenpy.utils.xerox` |
+| `cg_valstr.pro` | `cubegenpy.utils.validate_string` |
+| `cg_get_uvis_modifier.pro` | Inline helper if needed |
+
+### Already exists in pyuvis (replaced)
+
+| IDL file | Replaced by |
+|---|---|
+| `cg_feuv_reader.pro` | `pyuvis.io.PDSReader` |
+| `open_pds_file.pro` | `pyuvis.io.PDSReader` |
+| `cg_get_fuv_red_patch.pro` | `pyuvis.hsp_sensitivity` |
+| `cg_read_ajs_flf.pro` | `pyuvis.calib.steffl` |
+| `cg_bin_win_flatfield.pro` | `pyuvis.calib.steffl` |
+| `cg_read_spica_ff_data.pro` | `pyuvis.calib.greg` |
+| `cg_get_filename.pro`, `get_file_location.pro` | `planetarypy.catalog.fetch_product` (via pyuvis) |
+| `cg_convert_sclk.pro` | `spiceypy.sct2e` (upstream) |
+| `cg_nogui.pro` | `cubegenpy.build.build_cube` is the no-GUI entry point |
+
+### Dropped (GUI / obsolete output formats / IDL-specific)
+
+::: {.callout-warning}
+These files do **not** get a Python equivalent. The functionality is
+either bound to the IDL widget toolkit, or a deliberate choice was made
+in the 2026-02 PDART team meeting to drop the format.
+:::
+
+| IDL file | LOC | Reason |
+|---|---:|---|
+| `cube_generator.pro` | 1107 | IDL widget GUI — out of scope; if any GUI is wanted later it would be Streamlit/Panel |
+| `cube_control.pro` | 308 | GUI control flow |
+| `cg_write_save_new.pro` | 255 | IDL `.sav` output replaced by FITS |
+| `cg_write_save_new_multi.pro` | 255 | Same |
+| `cg_write_binary.pro` | <100 | Raw binary output replaced by FITS |
+| `cg_write_save_orig.pro` | <100 | Old IDL `.sav` writer |
+| `path_finder_*.txt`, `T-0.txt` | text | Local-machine-specific paths; gone |
+
+### Deferred to a later phase
+
+| IDL file | LOC | Phase | Notes |
+|---|---:|---|---|
+| `cube_multi.pro` | 1009 | 3 | Multi-window batching with A/B suffixed sibling files (occurs in ~0.005% of products per the 2026-02 meeting notes) |
+| `cg_getstar.pro` | <100 | 3 | Star observation special case |
+
+### Reference assets (preserved as-is, not ported)
+
+| File | Where it lands |
+|---|---|
+| `Cube Generator.doc` | Original IDL tutorial, kept in IDL tree |
+| `UVISImageCube.doc`, `UVISImageCube_descriptions.doc` | Original IDL cube format spec — superseded by the new FITS layout (see `refs/FITS-layout-proposal-MRS-2025-02-03.pdf`) |
+| `cube_generator_tutorial.README` | Original README; relevant pieces lifted into this doc |
+| `GeometerStars.txt`, `cg_defaults.txt` | Original IDL defaults — values consulted as needed; not loaded at runtime |
+| `uvis_wl.sav`, `Spica_FF_data.sav`, `*.gif` | Replaced (wavelengths from pyuvis; flatfield data lives with calibration code; gifs were GUI assets) |
+
+## Planned Python module layout
+
+```
+src/cubegenpy/
+  __init__.py          # re-exports build_cube, __version__
+  build.py             # public API: build_cube() entry point
+  config.py            # BuildConfig dataclass (replaces the IDL pass struct)
+  fits_writer.py       # assembles the 9 HDUs per Mark's spec
+  pds4_label.py        # emits the PDS4 XML label alongside the FITS
+  geometry.py          # validates / normalises the input geometry dict
+  utils.py             # small helpers ported from cg_*
+```
+
+## FITS output layout
+
+Per Mark Showalter's 2026-02 proposal in `refs/FITS-layout-proposal-MRS-2025-02-03.pdf`:
+
+| HDU | Type | Content |
+|---|---|---|
+| `PRIMARY` | IMAGE float32 | Calibrated cube `(NX, NY, NZ)` |
+| `RAW_COUNTS` | IMAGE int16 | Raw counts cube, same shape |
+| `CAL_FACTOR` | IMAGE float32 | 2-D `(NX, NY)` calibration matrix |
+| `WAVELENGTH` | IMAGE float32 | Center wavelengths, length `NX` |
+| `SC_GEOM` | BINTABLE | Spacecraft + sub-spacecraft geometry per body |
+| `BODY_GEOM` | BINTABLE | Spatial backplanes per resolved body |
+| `GENERAL_GEOM` | BINTABLE | RA, DEC, TIME_ET (body-independent) |
+| `RING_GEOM` | BINTABLE | Ring backplanes |
+| `KERNELS` | TABLE (ASCII) | SPICE kernels used to compute the geometry |
+
+The PDS4 XML label (sibling file `<pid>.xml`) describes every HDU and the
+product-level metadata.
+
+## Phase plan
+
+### Phase 1 — done
+
+- [x] Project skeleton (pyproject.toml, src layout, hatchling, bump-my-version, Python 3.12/13/14 supported)
+- [x] Public API stub `cubegenpy.build_cube` raising `NotImplementedError`
+- [x] This document
+- [x] Standalone git repo (`git init` inside `code/cubegenpy/`)
+- [x] `refs/` preserves Mark's FITS layout proposal and the team meeting notes
+
+### Phase 2 — next
+
+- [ ] `BuildConfig` dataclass (port of `cg_create_pass_struct`)
+- [ ] FITS HDU builders for all nine HDUs (Mark's layout)
+- [ ] PDS4 label generator (XML matching the FITS structure)
+- [ ] Geometry input validation (shape + key checks against Mark's column specs)
+- [ ] Single-product `build_cube` end-to-end on a default Titan EUV file
+- [ ] CI test workflow + smoke test
+- [ ] Quarto docs site (this file becomes its `index.qmd`; quartodoc API ref under `reference/`)
+- [ ] PyPI release of 0.2.0
+
+### Phase 3 — later
+
+- [ ] Multi-window observations: A/B suffixed sibling files
+- [ ] Background-subtraction HDU (planned in 2026-02 meeting; needs a time dimension)
+- [ ] Geometry input format spec (when Mark's actual files arrive — likely a separate FITS that we copy from)
+- [ ] Star observation special case (`cg_getstar`)
+- [ ] PDS4 label validation against the official schema
