@@ -1,0 +1,60 @@
+project:
+  type: website
+  output-dir: _build
+  preview:
+    port: 4201
+    browser: true
+
+execute:
+  freeze: auto
+
+website:
+  title: cubegenpy
+  description: Build PDS4-compliant FITS cubes for Cassini UVIS observations
+  repo-url: https://github.com/Cassini-UVIS/cubegenpy
+  repo-actions: [issue]
+  navbar:
+    search: true
+    left:
+      - text: Home
+        href: index.qmd
+      - text: API Reference
+        href: reference/index.qmd
+    right:
+      - icon: github
+        aria-label: GitHub
+        href: https://github.com/Cassini-UVIS/cubegenpy
+  sidebar:
+    - title: Overview
+      style: docked
+      contents:
+        - index.qmd
+    - title: API Reference
+      contents: "{{ contents }}"
+
+format:
+  html:
+    theme:
+      dark: [darkly]
+      light: [flatly]
+    toc: true
+    toc-depth: 3
+    toc-title: Contents
+    toc-location: right
+    code-link: true
+
+metadata-files:
+  - reference/_sidebar.yml
+
+quartodoc:
+  style: pkgdown
+  dir: reference
+  package: cubegenpy
+  parser: numpy
+  sidebar: reference/_sidebar.yml
+  title: API Reference
+  sections:
+    - title: Public API
+      desc: The single entry point for assembling a UVIS PDS4 FITS product.
+      contents:
+        - build
