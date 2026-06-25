@@ -1,0 +1,12 @@
+/*-- scss:rules --*/
+// Fix the Bootswatch/Quarto dark-mode inline-code readability bug:
+// inline `code` defaults to a near-white background with light text, which
+// makes it nearly invisible. Force a dark, low-opacity background + light text.
+// Scoped to inline code only (`:not(.sourceCode)`) so highlighted code blocks
+// are untouched.
+code:not(.sourceCode) {
+  background-color: rgba(255, 255, 255, 0.10);
+  color: #f0f3f6;
+  padding: 0.15em 0.35em;
+  border-radius: 0.25rem;
+}

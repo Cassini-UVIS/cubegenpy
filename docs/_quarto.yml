@@ -18,6 +18,8 @@ website:
     left:
       - text: Home
         href: index.qmd
+      - text: Plan Review
+        href: review.qmd
       - text: API Reference
         href: reference/index.qmd
     right:
@@ -29,13 +31,14 @@ website:
       style: docked
       contents:
         - index.qmd
+        - review.qmd
     - title: API Reference
       contents: "{{ contents }}"
 
 format:
   html:
     theme:
-      dark: [darkly]
+      dark: [darkly, dark.scss]
       light: [flatly]
     toc: true
     toc-depth: 3

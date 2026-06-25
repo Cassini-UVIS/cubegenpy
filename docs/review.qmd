@@ -1,0 +1,139 @@
+---
+title: "Migration plan review"
+subtitle: "Status of the IDL `cube_generator` → cubegenpy port"
+author: "K.-Michael Aye"
+date: 2026-06-19
+toc: true
+toc-depth: 3
+---
+
+## What this page is
+
+A point-in-time **review** of the IDL → Python migration — where the port
+stands, which decisions are locked, and what the next move is. The
+file-by-file translation map lives on the [Home](index.qmd) page; the
+implementation recipe lives in `PORT_PLAN.md`. This page sits on top of both
+and answers: *is the plan sound, and where are we in it?*
+
+::: {.callout-note}
+**Snapshot date: 2026-06-19.** Reflects the working tree at review time, not
+a tagged release. cubegenpy is unreleased and pre-1.0.
+:::
+
+## The plan in one paragraph
+
+Recreate the **non-GUI** IDL UVIS cube-generation pipeline in Python, where the
+final product is the **new PDS4 FITS file** (per Mark Showalter's 2026-02 layout
+proposal), replacing the legacy IDL `.cube`/`.sav` output. Two constraints are
+locked team decisions: **(1) geometry is supplied externally and is never
+recomputed** — the entire IDL geometer path is skipped, not ported; and **(2)
+obsolete IDL is dropped, not ported** — of ~6,250 LOC across 32 `.pro` files
+(mostly GUI/geometry/superseded-by-pyuvis), only a thin science + orchestration
+core is genuinely needed.
+
+## Scope at a glance
+
+cubegenpy **owns** stages 0, 3, 11, 12, 14 of the traced pipeline; **delegates**
+2/4/8/10 to pyuvis; **skips** 1/5/6 (geometry); stage 9 (calibration source) was
+the open decision — now resolved (see below).
+
+| Concern | Disposition |
+|---|---|
+| Read PDS3 DAT/LBL, wavelengths, flatfields, calibration | **Delegate** → pyuvis |
+| Geometry / backplanes / SPICE kernels | **External input** — never computed here |
+| FITS assembly + PDS4 label + provenance | **Own** — the genuine new code |
+| GUI, `.sav`/ENVI/binary writers, frozen SCLK table, à-la-carte cal branch | **Drop** — no Python equivalent |
+
+## Where we are
+
+| Component | File | State |
+|---|---|---|
+| Implementation recipe | `PORT_PLAN.md` | ✅ Complete (untracked) |
+| `BuildConfig` (port of IDL `pass` struct) | `config.py` | ✅ Complete (untracked) |
+| FITS writer | `writer.py` (266 LOC) | ✅ Done (uncommitted) |
+| Layout spec (proposal-as-data) | `layout.py` (226 LOC) | ✅ Done (uncommitted) |
+| Draft PDS4 label | `labels.py` | ✅ Done (uncommitted) |
+| Structural writer test | `tests/test_writer.py` | ✅ Done (uncommitted) |
+| **Orchestration entry point** | `build.py` | ⛔ **Still a `NotImplementedError` stub** |
+| Geometry-dict validator | `geometry.py` | ⬜ Not started |
+| Golden-file cal parity test | — | ⬜ Not started |
+
+::: {.callout-important}
+Nothing is committed beyond the initial scaffolding commit. All of the
+above — the writer layer, the port plan, and the config — is uncommitted
+working-tree state.
+:::
+
+## Phase order and progress
+
+From `PORT_PLAN.md §8`:
+
+1. ✅ **PORT_PLAN.md + `config.py` scaffold + decision gate** — done.
+2. ⬜ **Implement `build_cube`** (Option-A pyuvis glue first) — *next up*.
+3. ⬜ Geometry-dict validator (`geometry.py`) against `layout` specs.
+4. ⬜ Golden-file calibration parity test (one EUV + one FUV product).
+5. ⬜ Multi-window A/B split; optional `BACKGROUND` HDU (deferred).
+
+## Locked decisions
+
+### Calibration source → `"pyuvis"` (Option A)
+
+The calibrated cube + `CAL_FACTOR` HDU come from pyuvis' already-calibrated PDS
+read (counts × PDS cal matrix → kR; wavelengths from `BAND_BIN_CENTER`;
+flatfields via `calib.steffl`/`calib.greg`). cubegenpy is thin glue: *pyuvis
+(data + cal) + external geometry → FITS*. A seam
+(`BuildConfig.calibration = "pyuvis" | "regenerate" | "none"`) keeps the full
+IDL-parity port (`Get_UVIS_calibration`, the Greg "Ultimate" time-varying cal)
+available later without blocking now. Default is `"pyuvis"`; `"regenerate"`
+deliberately raises `NotImplementedError` until bit-parity is actually required.
+
+### Input data → rely on pyuvis (confirmed)
+
+All data I/O is delegated to pyuvis rather than re-implemented. This is the
+foundation that makes Option A thin.
+
+## Open recommendation — fold cubegenpy into pyuvis as a `writer` sub-package
+
+Given the input-data decision, the natural follow-on question is whether
+cubegenpy should remain a standalone repo at all.
+
+**Recommendation: yes, merge into pyuvis as an opt-in sub-package
+(`pyuvis.writer`, installed via `pip install pyuvis[cubegen]`) — and do it soon,
+right after `build_cube` first works end-to-end (Phase 2), before any tagged
+release or external use.**
+
+Rationale:
+
+- **No dependency argument for separation.** cubegenpy's full runtime footprint
+  is `numpy, astropy, pyuvis, planetarypy, lxml` — every one except `lxml` is
+  already a pyuvis dependency, and the source actually uses stdlib `xml.etree`,
+  so the real added weight is ~zero. The usual reason to isolate archive
+  tooling (heavy niche deps) does not apply.
+- **It's a feature, not a library.** With Option A, cubegenpy is mostly thin
+  glue over pyuvis internals (`UVPDS.calibrated`, `BAND_BIN_CENTER`,
+  `calib.steffl/greg`) — the signature of a library feature, not a separate
+  package.
+- **Migration cost only rises.** Today there is no PyPI release, no users, and
+  no cross-repo version pins in the wild — merging is copying ~5 files. Later it
+  means migrating tag history, CI, the GH Pages site, and downstream pins.
+- **Kills the version-pin treadmill.** `cubegenpy depends on pyuvis>=0.9` means
+  every pyuvis calibration change can silently break the writer across repos.
+  Co-located, a cal refactor and its golden-parity test land in one atomic PR.
+
+The one nuance: don't merge *this instant*. The API shape (`build_cube`
+signature, geometry-dict contract) is still unstable and `build.py` is currently
+out of sync with `config.py`. Finish Phase 2 first, then move it in. Practical
+consequence: **keep cubegenpy unreleased — do not tag `v0.1.0` to PyPI** — so
+there is nothing to deprecate when it becomes `pyuvis.writer`.
+
+## Risks and watch-items
+
+- **`build.py` / `config.py` drift.** `build.py` still carries its own inline
+  `CubeProduct` and a `calibration: str = "default"` param, while `config.py`
+  defines `BuildConfig` with `"pyuvis"`. Reconcile these when implementing
+  Phase 2.
+- **Cal parity is unverified.** Option A does not guarantee bit-parity with the
+  IDL `Get_UVIS_calibration`. The golden-file test (Phase 4) is what converts
+  "should match" into "does match."
+- **Geometry contract is informal.** The external geometry dict is validated
+  only by prose until `geometry.py` (Phase 3) checks it against `layout`.
