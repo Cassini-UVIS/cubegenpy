@@ -20,6 +20,8 @@ website:
         href: index.qmd
       - text: Plan Review
         href: review.qmd
+      - text: Design
+        href: design.qmd
       - text: API Reference
         href: reference/index.qmd
     right:
@@ -32,6 +34,7 @@ website:
       contents:
         - index.qmd
         - review.qmd
+        - design.qmd
     - title: API Reference
       contents: "{{ contents }}"
 

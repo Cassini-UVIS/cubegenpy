@@ -1,0 +1,191 @@
+---
+title: "OO core design"
+subtitle: "CubeBuilder + Calibrator + FITS readback — the class decomposition"
+author: "K.-Michael Aye"
+date: 2026-06-25
+toc: true
+toc-depth: 3
+---
+
+## Context
+
+cubegenpy is the Python successor to the IDL `cube_generator`. The writer layer
+(`writer.py`, declarative `layout.py`, `labels.py`, `demo.py`) is done and stays
+untouched. What's missing is the orchestration core: `build.py` is a
+`NotImplementedError` stub that disagrees with `config.py`. This page is the
+design for that core — a small, class-based OO layer that modernizes the IDL
+pipeline.
+
+Locked decisions (confirmed with the PI):
+
+- **API = a class-based `CubeBuilder`** you configure, then call `.build()`.
+- **Geometry is always external input, never computed** — the IDL SPICE
+  `GEOMETER_ENGINE` per-pixel loop is dropped entirely.
+- **No Showalter geometry data exists yet** → exercise FITS-building with
+  **synthetic data** (reuse `demo.make_synthetic_product`).
+- **Recalibration (user-time), as a start, changes ONLY the background-subtraction
+  offset.** No port of the IDL `Get_UVIS_calibration` is needed now.
+- **Background subtraction is the central knob**, modeled as a value/spec, not a bool.
+- **Calibration is extensible** to incorporate more stellar calibration
+  observations (Spica, etc.) via a `CalModel` seam.
+- Dropped for good: multi-format output (FITS only) and temporal-smearing branches.
+
+## Design principle
+
+`writer.build_hdulist(...)` keyword arguments **are the interchange format**. A
+frozen `ProductInputs` dataclass equals that argument set. A `Source` produces a
+`ProductInputs`; the `Calibrator` fills its `cube` field; `CubeBuilder.build()`
+splats it into `build_hdulist`. Synthetic-build and FITS-readback-recalibrate
+become **one pipeline with different front ends**.
+
+## Component relationships
+
+How the classes compose. `Source` and `CalModel` are Protocols; everything else
+plugs into the `CubeBuilder` → `writer` spine. Dashed nodes are future seams.
+
+```{mermaid}
+flowchart TD
+    subgraph cfg[Configuration]
+        BuildConfig -->|has| Background
+        BuildConfig -->|calibration mode| modeStr["pyuvis | stored | none | regenerate*"]
+    end
+
+    subgraph src[Sources &lpar;Protocol: Source&rpar;]
+        SyntheticSource
+        FitsReadbackSource
+        PyuvisSource["PyuvisSource (future)"]:::future
+    end
+    FitsReadbackSource -->|uses| readproduct["fitsio.read_product"]
+
+    subgraph cal[Calibration]
+        Calibrator -->|uses| CalModel{{"CalModel (Protocol)"}}
+        CalModel -.-> StoredCalModel
+        CalModel -.-> PyuvisCalModel
+        CalModel -.-> SpicaCalModel["SpicaCalModel (future)"]:::future
+        Calibrator -->|applies| Background
+    end
+
+    CubeBuilder -->|configured with| src
+    CubeBuilder -->|configured with| BuildConfig
+    CubeBuilder -->|configured with| Calibrator
+
+    SyntheticSource -->|.load&lpar;&rpar;| PI[(ProductInputs)]
+    FitsReadbackSource -->|.load&lpar;&rpar;| PI
+    Calibrator -->|fills .cube| PI
+    PI -->|as_writer_kwargs| BH["writer.build_hdulist"]
+    CubeBuilder -->|.build&lpar;&rpar;| BH
+    BH --> WP["writer.write_product"]
+    WP --> CP[(CubeProduct)]
+
+    classDef future stroke-dasharray: 5 5,fill:#eee,color:#333;
+```
+
+`ProductInputs` mirrors `build_hdulist` exactly: `raw_counts, cal_factor,
+wavelength, header, geometry, kernels, bodies, resolved_bodies, dims,
+rings_in_fov, edge_on` plus a `cube` field the `Calibrator` fills before writing.
+
+## The two pipelines (one spine, two front-ends)
+
+The build path and the recalibration path differ only in **which Source** loads
+the inputs and **which `CalModel`** the `Calibrator` uses.
+
+```{mermaid}
+flowchart LR
+    subgraph build["Build path (synthetic / future production)"]
+        S1[SyntheticSource] --> PI1[(ProductInputs)]
+        PI1 --> C1["Calibrator(PyuvisCalModel)"]
+        C1 -->|"(raw/int_time − bg) × cal_factor"| Q1[cube]
+        Q1 --> W1[build_hdulist → write_product]
+        W1 --> F1[/FITS product/]
+    end
+
+    subgraph recal["Recalibration path (user-time)"]
+        F0[/downloaded FITS/] --> R[fitsio.read_product]
+        R --> PI2[(ProductInputs<br/>raw + stored cal_factor + geometry + header)]
+        PI2 --> C2["Calibrator(StoredCalModel)"]
+        BGnew[/new Background offset/] --> C2
+        C2 -->|"reuse stored cal_factor;<br/>only offset changes"| Q2[cube']
+        Q2 --> W2[build_hdulist → write_product]
+        W2 --> F2[/FITS product'<br/>only primary cube differs/]
+    end
+```
+
+**Central formula** (identical in both paths):
+
+```
+calibrated = (raw_counts / int_time − background_offset) × cal_factor
+```
+
+In the recalibration path, `StoredCalModel` returns the FITS's CAL_FACTOR
+verbatim, so a rebuild with a new `Background` changes **only** the primary cube —
+CAL_FACTOR, RAW_COUNTS, geometry, kernels and header round-trip byte-identical.
+
+## Module / class layout
+
+New files under `src/cubegenpy/`:
+
+| File | Classes / fns | Responsibility | Reuses |
+|---|---|---|---|
+| `product.py` | `ProductInputs`, `CubeProduct` (moved from `build.py`) | Canonical payload mirroring `build_hdulist`; build result | `writer.Dims` |
+| `calibrate.py` | `Background`, `CalModel`, `StoredCalModel`, `PyuvisCalModel`, `Calibrator` | counts→calibrated cube + CAL_FACTOR; background knob; **extension seam** | `pyuvis.io`, `pyuvis.calib` |
+| `fitsio.py` | `read_product(path)` | NEW: read our own FITS back, layout-driven | `layout`, `astropy.io.fits` |
+| `sources.py` | `Source`, `SyntheticSource`, `FitsReadbackSource` | Produce a `ProductInputs` | `demo`, `fitsio` |
+| `builder.py` | `CubeBuilder` | Configure → `.build() → CubeProduct` | `writer`, `config` |
+| `config.py` | `BuildConfig` (reconciled) | knobs incl. `background: Background` | — |
+| `build.py` | `build_cube(...)` thin wrapper | back-compat functional entry | `builder`, `sources` |
+
+## Calibrator — the focus
+
+`Background` (frozen dataclass) models the two IDL modes as data:
+`mode: "none" | "rtg" | "spectral_average"`, `rtg_value=0.0004`, `spatial_bin`,
+`spectral_bin`, `wavelength_range`. `.offset(counts_per_sec, wavelength)` returns
+the value to subtract — replacing the IDL's counts-vs-counts/sec ambiguity and its
+`eq 2/eq 3` dimensionality branches (numpy broadcasting handles it).
+
+`CalModel` (Protocol) is the **extension seam** for how `cal_factor` is produced:
+
+- `StoredCalModel(stored)` — recalibration: returns the FITS CAL_FACTOR verbatim.
+- `PyuvisCalModel` — build path: derive cal_factor from pyuvis. Thin glue;
+  exercised once real PDS data is wired.
+- `SpicaCalModel` *(future, documented stub)* — stellar-calibration-augmented cal
+  factor composing lab sensitivity × spectral modifier × (1/flatfield), mapping
+  onto IDL `Get_UVIS_calibration` and `pyuvis.calib.greg`/`steffl`. **This is the
+  seam for "more calibration observations not yet analyzed."**
+
+## Reconciled config
+
+```python
+CalibrationSource = Literal["pyuvis", "stored", "regenerate", "none"]
+
+@dataclass(frozen=True)
+class BuildConfig:
+    calibration: CalibrationSource = "pyuvis"
+    background: Background = Background()        # default mode="none"
+    write_pds4_label: bool = True
+    fits_version: float = 1.0
+```
+
+`"stored"` is the recalibration-from-FITS mode; `"regenerate"` stays
+reserved+raising (the `SpicaCalModel` seam); `subtract_background: bool` is
+replaced by `background: Background` (a bool can't carry RTG value / wavelength
+range). `build.py:build_cube` becomes a thin wrapper that maps legacy
+`"default"`→`"pyuvis"` and delegates to `CubeBuilder`.
+
+## Verification
+
+A new `tests/test_recalibrate.py` (reusing `test_writer.py` patterns) asserts:
+**round-trip identity** (readback inverts the writer bit-for-bit when
+`background="none"`), the **headline guarantee** that recalibration changes only
+the offset (`cube2 − cube1 == −offset × cal_factor`, everything else unchanged),
+**Calibrator unit math** per background mode, **config** behavior, and the
+**no-geometry guarantee** (no SPICE imports in `calibrate.py`/`builder.py`).
+
+## Explicitly deferred (seams left open)
+
+- `PyuvisSource` (real PDS fetch + Showalter geometry ingest) — blocked on the
+  Showalter folder format, which doesn't exist yet.
+- `SpicaCalModel` / real integration of `pyuvis.calib.steffl`+`greg` and the IDL
+  `Get_UVIS_calibration` chain — the calibration-observation extension work. **The
+  natural next phase after the skeleton lands.**
+- Row-wise NaN interpolation (`cg_interpolate_nans2`) — `np.nan_to_num` stands in
+  until real FUV data needs it.
