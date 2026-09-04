@@ -45,6 +45,32 @@ class RawCountsWidened(UserWarning):
     """Emitted when a product must be stored as int32."""
 
 
+class TemplateFallback(UserWarning):
+    """The data-definition workbook could not be read; layout.py v1 is in use."""
+
+
+_warned_fallback = False
+
+
+def _warn_template_fallback(exc: Exception) -> None:
+    """Say so, once, when the workbook is unavailable.
+
+    Falling back silently would emit v1-shaped products from an installation
+    that merely failed to ship the workbook -- structurally valid files with the
+    wrong column inventory, which is the worst way to fail.
+    """
+    global _warned_fallback
+    if _warned_fallback:
+        return
+    _warned_fallback = True
+    warnings.warn(
+        f"data-definition workbook unavailable ({type(exc).__name__}: {exc}); "
+        "falling back to the v1 layout in cubegenpy.layout. Products written "
+        "now will NOT match the v2 proposal.",
+        TemplateFallback, stacklevel=3,
+    )
+
+
 def hdu_specs(*, rings_in_fov: bool = False, edge_on: bool = False) -> list[HDUSpec]:
     """HDU specs from the data-definition workbook, falling back to `layout`.
 
@@ -55,7 +81,8 @@ def hdu_specs(*, rings_in_fov: bool = False, edge_on: bool = False) -> list[HDUS
     try:
         from .template import load
         return load().hdu_specs(rings_in_fov=rings_in_fov, edge_on=edge_on)
-    except Exception:  # noqa: BLE001 - any load failure falls back to v1
+    except Exception as exc:  # noqa: BLE001
+        _warn_template_fallback(exc)
         return layout.hdu_specs(rings_in_fov=rings_in_fov, edge_on=edge_on)
 
 
@@ -64,7 +91,8 @@ def primary_keywords() -> tuple[Keyword, ...]:
     try:
         from .template import load
         return load().keywords
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        _warn_template_fallback(exc)
         return layout.PRIMARY_KEYWORDS
 
 def _apply_hdu_keywords(hdu, extname: str, computed: dict | None = None) -> None:

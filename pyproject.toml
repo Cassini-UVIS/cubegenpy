@@ -27,6 +27,10 @@ dependencies = [
     "pyuvis>=0.9.0",
     "planetarypy>=0.55.0",
     "lxml",
+    # The data-definition workbook is the source of truth for the FITS layout
+    # (cubegenpy.template); openpyxl is what lets pandas read the .xlsx.
+    "pandas",
+    "openpyxl",
 ]
 
 [project.urls]
