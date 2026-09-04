@@ -31,6 +31,33 @@ class ProductInputs:
     only field a :class:`~cubegenpy.sources.Source` may leave as ``None`` — the
     :class:`~cubegenpy.calibrate.Calibrator` computes it from ``raw_counts`` and
     ``cal_factor`` and the builder fills it in via :func:`dataclasses.replace`.
+
+    Array conventions
+    -----------------
+    These are the contract between this package and ``pyuvis``, and they are
+    conventional rather than enforced by any import — which is exactly why they
+    are written down here. Everything on this class is in **caller order**; the
+    reversal to the proposal's FITS order happens once, in
+    :func:`cubegenpy.writer._to_fits_order`, and is undone once, in
+    :func:`cubegenpy.fitsio.read_product`.
+
+    ==================  ===========================================================
+    ``cube``            ``(NX, NY, NZ)`` float32. NaN marks undefined.
+    ``raw_counts``      ``(NX, NY, NZ)`` **uint16**, PDS3 convention: 65535 is the
+                        null, not a count. Written to FITS as signed int16 (or
+                        int32 when a real value exceeds 32767) with the null
+                        recoded to -1 and declared via ``BLANK``.
+    ``cal_factor``      ``(NX, NY)`` float32.
+    ``wavelength``      ``(NX,)`` float32, **Angstrom** — note ``pyuvis`` returns
+                        nm, so the production path must convert.
+    geometry cells      ``(nrows, *reversed(tdim))``: a ``5,NY,NZ,NT`` backplane
+                        arrives as ``(nrows, NT, NZ, NY, 5)``.
+    ==================  ===========================================================
+
+    ``pyuvis`` reads PDS3 qubes with ``reshape(CORE_ITEMS, order="F")``, so its
+    arrays are Fortran-ordered with shape ``(NX, NY, NZ)`` — which is what makes
+    the writer's transpose a no-copy view and lets the FITS data section
+    reproduce the PDS3 byte sequence.
     """
 
     cube: np.ndarray | None
