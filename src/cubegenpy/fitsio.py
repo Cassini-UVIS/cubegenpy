@@ -24,7 +24,7 @@ import numpy as np
 from astropy.io import fits
 
 from . import layout
-from .layout import CAL_FACTOR_NULL
+from .layout import CAL_FACTOR_NULL, RAW_COUNTS_BLANK, RAW_COUNTS_NULL
 from .product import ProductInputs
 from . import writer
 from .writer import Dims
@@ -44,7 +44,15 @@ def read_product(path: str | Path) -> ProductInputs:
         cube = np.ascontiguousarray(np.array(primary.data, dtype=np.float32).T)
         header = _read_header(primary.header)
 
-        raw_counts = np.ascontiguousarray(np.array(hdul["RAW_COUNTS"].data).T)
+        # On disk RAW_COUNTS is signed (int16, or int32 when widened) with -1
+        # for nulls. Callers work in the PDS3 convention -- uint16 with 65535 --
+        # which is also what pyuvis returns, so invert both here.
+        # astropy converts an integer HDU carrying BLANK to float, with blanks
+        # as NaN, so accept either form and return the PDS3 convention
+        # (uint16, 65535 for null) that callers and pyuvis use.
+        _raw = np.ascontiguousarray(np.array(hdul["RAW_COUNTS"].data).T)
+        _null = np.isnan(_raw) if _raw.dtype.kind == "f" else _raw == RAW_COUNTS_BLANK
+        raw_counts = np.where(_null, RAW_COUNTS_NULL, _raw).astype(np.uint16)
 
         cal_factor = np.ascontiguousarray(
             np.array(hdul["CAL_FACTOR"].data, dtype=np.float32).T)

@@ -35,6 +35,12 @@ CAL_FACTOR_NULL = -1000.0
 # reads as "no data" rather than as a plausible zero count.
 RAW_COUNTS_NULL = 65535
 
+# The proposal's integer null (p.5), declared in the header via BLANK.
+RAW_COUNTS_BLANK = -1
+
+# Largest value a signed 16-bit integer can hold.
+INT16_MAX = 32767
+
 # Values of the PIPESTAT keyword, which records how far a product has been
 # through the pipeline. A geometry-only product is structurally complete and
 # indistinguishable from a finished one without this.

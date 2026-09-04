@@ -20,6 +20,7 @@ the caller's arrays are expected with the **reversed** trailing shape
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -29,7 +30,19 @@ import numpy as np
 from astropy.io import fits
 
 from . import layout
-from .layout import CAL_FACTOR_NULL, Column, HDUSpec, Keyword
+from .layout import (
+    CAL_FACTOR_NULL,
+    INT16_MAX,
+    RAW_COUNTS_BLANK,
+    RAW_COUNTS_NULL,
+    Column,
+    HDUSpec,
+    Keyword,
+)
+
+
+class RawCountsWidened(UserWarning):
+    """Emitted when a product must be stored as int32."""
 
 
 def hdu_specs(*, rings_in_fov: bool = False, edge_on: bool = False) -> list[HDUSpec]:
@@ -64,6 +77,61 @@ def _to_fits_order(arr: np.ndarray) -> np.ndarray:
     so the reversal happens here at the boundary and nowhere else.
     """
     return np.ascontiguousarray(arr.T)
+
+
+class RawCountsOverflow(ValueError):
+    """A product's raw counts exceed what signed 16-bit can hold."""
+
+
+def _raw_counts_hdu(raw_counts, *, on_overflow: str = "widen") -> fits.ImageHDU:
+    """RAW_COUNTS as *signed* integers, widening to int32 only when required.
+
+    Signed rather than unsigned deliberately. FITS can express unsigned 16-bit
+    via BITPIX=16 + BZERO=32768, but that writes offset binary -- physical 0
+    becomes 0x8000 -- so none of the bytes match the PDS3 encoding, and the
+    offset would have to be restated in the PDS4 label as ``value_offset``.
+    A reader honouring both descriptions would apply it twice. PDS4 requires the
+    label alone to be sufficient, so the file must carry exactly one description
+    of its own values: signed integers, no offset, no scaling.
+
+    Overflow is therefore detected here, at write time, from data already in
+    memory -- there is no need to survey the archive up front. Every widened
+    product records ``RAWWIDEN = T``, so the set of affected products is
+    recoverable from the finished archive by reading headers.
+
+    ``on_overflow`` is ``"widen"`` (int32 + a loud warning) or ``"raise"``.
+    """
+    arr = np.asarray(raw_counts)
+
+    # PDS3 marks nulls with 65535; FITS integers cannot hold NaN, so the
+    # proposal uses -1 and declares it with BLANK.
+    is_null = arr == RAW_COUNTS_NULL if arr.dtype.kind == "u" else arr < 0
+    real = arr[~is_null]
+    peak = int(real.max()) if real.size else 0
+
+    if peak > INT16_MAX:
+        if on_overflow == "raise":
+            raise RawCountsOverflow(
+                f"raw counts peak at {peak}, above the int16 limit "
+                f"({INT16_MAX}). Pass on_overflow='widen' to store this "
+                f"product as int32."
+            )
+        if on_overflow != "widen":
+            raise ValueError(f"unknown on_overflow mode: {on_overflow!r}")
+        warnings.warn(
+            f"RAW_COUNTS peak {peak} exceeds int16; widening this product to "
+            f"int32 (BITPIX=32). Recorded as RAWWIDEN=T in the header.",
+            RawCountsWidened, stacklevel=3,
+        )
+        dtype, widened = np.int32, True
+    else:
+        dtype, widened = np.int16, False
+
+    out = np.where(is_null, RAW_COUNTS_BLANK, arr).astype(dtype)
+    hdu = fits.ImageHDU(_to_fits_order(out), name="RAW_COUNTS")
+    hdu.header["BLANK"] = (RAW_COUNTS_BLANK, "Value denoting an undefined count")
+    hdu.header["RAWWIDEN"] = (widened, "Counts exceeded int16; stored as int32")
+    return hdu
 
 
 _KIND_TO_NP = {"float32": np.float32, "float64": np.float64, "bool": np.bool_}
@@ -210,6 +278,7 @@ def build_hdulist(
     cal_factor: np.ndarray,
     wavelength: np.ndarray,
     background: np.ndarray | None = None,
+    on_overflow: str = "widen",
     header: Mapping[str, object],
     geometry: Mapping[str, Mapping[str, object]],
     kernels: Sequence[tuple[str, str]],
@@ -246,11 +315,7 @@ def build_hdulist(
                   else np.asarray(background, dtype=np.float32))
             hdus.append(fits.ImageHDU(_to_fits_order(bg), name="BACKGROUND"))
         elif spec.name == "RAW_COUNTS":
-            # Raw UVIS counts are unsigned 16-bit (0-65535); int16 would overflow
-            # above 32767. astropy writes BITPIX=16 + BZERO=32768 for uint16.
-            hdus.append(fits.ImageHDU(
-                _to_fits_order(np.asarray(raw_counts, dtype=np.uint16)),
-                name="RAW_COUNTS"))
+            hdus.append(_raw_counts_hdu(raw_counts, on_overflow=on_overflow))
         elif spec.name == "CAL_FACTOR":
             cf = np.array(cal_factor, dtype=np.float32)  # own a float32 copy
             cf[np.isnan(cf)] = CAL_FACTOR_NULL           # fill NULL in place

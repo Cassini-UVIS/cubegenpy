@@ -99,7 +99,11 @@ def test_placeholders_are_self_announcing(skeleton):
     """Never zero: a zero flux is legal and would hide an unfilled product."""
     with fits.open(skeleton) as hdul:
         assert np.all(np.isnan(hdul[0].data))
-        assert np.all(hdul["RAW_COUNTS"].data == RAW_COUNTS_NULL)
+        # Placeholder 65535 is written as the proposal's integer null (-1);
+        # BLANK makes astropy surface it as NaN on read.
+        raw = hdul["RAW_COUNTS"]
+        assert raw.header["BLANK"] == -1
+        assert np.all(np.isnan(raw.data))
         assert np.all(np.isnan(hdul["BACKGROUND"].data))
 
 

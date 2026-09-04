@@ -46,10 +46,18 @@ def test_primary_is_float32_cube(product):
     assert prim.header['NAXIS1'] == D.NX
 
 
-def test_raw_counts_is_uint16(product):
+def test_raw_counts_is_signed_int16(product):
+    """Signed, not unsigned: BZERO would need a second description in the
+    PDS4 label (value_offset), and a reader honouring both would apply it
+    twice. See writer._raw_counts_hdu."""
     hdul, _ = product
     raw = hdul["RAW_COUNTS"]
-    assert _is(raw.data.dtype, "u", 2)             # ISC-2 (raw counts are unsigned)
+    # BITPIX is the on-disk fact; astropy hands back float+NaN because BLANK
+    # is present, which is why the dtype is not asserted here.
+    assert raw.header["BITPIX"] == 16              # ISC-2, signed 2-byte
+    assert "BZERO" not in raw.header               # no hidden offset
+    assert raw.header["BLANK"] == -1               # null declared, per v2 p.5
+    assert raw.header["RAWWIDEN"] is False
     assert raw.data.shape == (D.NZ, D.NY, D.NX)
 
 

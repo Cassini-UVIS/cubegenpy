@@ -97,19 +97,40 @@ def test_round_trip_bit_identical(tmp_path):
         _assert_primary_keywords_equal(h1, h2)
 
 
-def test_raw_counts_uint16_round_trips_above_int16_max(tmp_path):
-    """A raw count > 32767 survives the readback (finding #1 regression guard)."""
-    fits1 = _build_synthetic(tmp_path / "a")
-    inputs = read_product(fits1)
-    big = np.array(inputs.raw_counts, copy=True)
-    big[0, 0, 0] = 60000  # would overflow signed int16
-    inputs = replace(inputs, raw_counts=big)
+def test_counts_above_int16_widen_to_int32_loudly(tmp_path):
+    """A count > 32767 widens the product to int32 and says so.
+
+    This is what replaces a pre-flight survey of the archive: the writer has the
+    data in hand anyway, so overflow is discovered at file-creation time and
+    recorded in the header. BZERO/uint16 is deliberately not used -- see
+    writer._raw_counts_hdu.
+    """
+    import pytest
+
     from cubegenpy import writer
-    hdul = writer.build_hdulist(**inputs.as_writer_kwargs())
+    from cubegenpy.writer import RawCountsOverflow, RawCountsWidened
+
+    inputs = read_product(_build_synthetic(tmp_path / "a"))
+    big = np.array(inputs.raw_counts, copy=True)
+    big[0, 0, 0] = 60000
+    inputs = replace(inputs, raw_counts=big)
+
+    with pytest.warns(RawCountsWidened, match="60000"):
+        hdul = writer.build_hdulist(**inputs.as_writer_kwargs())
     out = writer.write_product(tmp_path / "c", "BIG", hdul, write_label=False)
+
     with fits.open(out["fits"]) as h:
-        assert h["RAW_COUNTS"].data[0, 0, 0] == 60000
-        assert h["RAW_COUNTS"].data.dtype.kind == "u"
+        raw = h["RAW_COUNTS"]
+        assert raw.header["BITPIX"] == 32          # widened
+        assert raw.header["RAWWIDEN"] is True      # self-reporting
+        assert raw.header["BLANK"] == -1
+        assert raw.data[0, 0, 0] == 60000          # value preserved
+    # and the value survives a full round-trip back to the caller convention
+    assert read_product(out["fits"]).raw_counts[0, 0, 0] == 60000
+
+    # Strict mode refuses instead, for a first pass that enumerates them.
+    with pytest.raises(RawCountsOverflow, match="60000"):
+        writer.build_hdulist(**(inputs.as_writer_kwargs() | {"on_overflow": "raise"}))
 
 
 # --------------------------------------------------------------------------- #
