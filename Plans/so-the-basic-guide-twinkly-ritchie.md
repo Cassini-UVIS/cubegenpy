@@ -33,19 +33,28 @@ synthetic inputs, can read one of our FITS products back, and recalibrate it by
 changing only the background offset — with the calibration component structured
 so real pyuvis/Spica calibration models drop in later without touching the core.
 
-## Status & resume checklist (handoff 2026-06-26)
+## Status & resume checklist (handoff 2026-06-29)
 
-**Done & committed on `main`** (`code/cubegenpy`):
-- `8222253` — writer layer (`writer.py`, `layout.py`, `labels.py`, `demo.py`),
-  `config.py`, `tests/test_writer.py`, `PORT_PLAN.md`.
+**OO core IMPLEMENTED** (Build order 1–7 all done; `pytest -q` = 30 passed in py314).
+**Uncommitted on disk, not yet committed** — review and commit to `main`:
+- New: `product.py`, `calibrate.py`, `fitsio.py`, `sources.py`, `builder.py`,
+  `tests/test_recalibrate.py`.
+- Modified: `build.py` (thin wrapper, CubeProduct moved to product.py),
+  `config.py` (background: Background, "stored", regenerate raises),
+  `demo.py` (delegates to CubeBuilder), `writer.py` + `layout.py` (RAW_COUNTS
+  uint16, finding #1), `tests/test_writer.py` (uint16), `__init__.py` (exports).
+- `calibration="none"` uses a dedicated `UnitCalModel`.
+
+**Earlier, committed on `main`:**
+- `8222253` — writer layer + `config.py` + `tests/test_writer.py` + `PORT_PLAN.md`.
 - `c9b33ab` — docs review page + dark-mode inline-code fix.
+- `17ce2cd` — docs/design.qmd + this plan file.
 
-**Uncommitted working tree** (present on disk, not yet committed):
-- `docs/design.qmd` (this plan as a Quarto page w/ Mermaid diagrams) + `docs/_quarto.yml` nav wiring.
-- `Plans/so-the-basic-guide-twinkly-ritchie.md` (this file).
-
-**Nothing implemented yet** — `build.py:build_cube` is still `NotImplementedError`.
-This plan is approved; next session starts at the build order below.
+**Next phase (deferred seams, see bottom):** `PyuvisSource` (real PDS fetch +
+Showalter geometry ingest, blocked on geometry format) and `SpicaCalModel` (real
+stellar-calibration chain). The `Source` and `CalModel` Protocols are the drop-in
+points. `build.py:build_cube` still raises `NotImplementedError` for the
+production signature by design (no `PyuvisSource` yet).
 
 **Findings discovered after the plan was written — fold into implementation:**
 1. **RAW_COUNTS dtype bug.** `writer.py:205` casts to signed `int16`

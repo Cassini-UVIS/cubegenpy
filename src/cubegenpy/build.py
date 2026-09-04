@@ -1,30 +1,28 @@
-"""Public API for assembling a Cassini UVIS observation into a PDS4 FITS product.
+"""Back-compat functional entry point over the OO core.
 
-This module's surface is intentionally small. Geometry is **not** computed
-here — it is provided as input by the upstream geometry pipeline (Mark's
-backplanes). cubegenpy's responsibility is to combine raw + calibrated UVIS
-data with that geometry into a single FITS file laid out per Mark's
-2026-02 proposal, and to emit a sibling PDS4 XML label.
+The working, runnable paths now live on :class:`cubegenpy.builder.CubeBuilder`
+plus a :class:`~cubegenpy.sources.Source`
+(:class:`~cubegenpy.sources.SyntheticSource` for synthetic builds,
+:class:`~cubegenpy.sources.FitsReadbackSource` for recalibration). This module
+keeps the original functional ``build_cube`` signature for the *production*
+path — fetch a real PDS product via pyuvis + ingest externally-computed
+geometry — which is not wired yet (blocked on the Showalter geometry format).
+
+``CubeProduct`` is re-exported from :mod:`cubegenpy.product`.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from .config import BuildConfig
+from .product import CubeProduct
 
-@dataclass(frozen=True)
-class CubeProduct:
-    """Result of a successful :func:`build_cube` call.
+__all__ = ["build_cube", "CubeProduct"]
 
-    Bundles **what was written** so callers can pass the paths straight
-    into archive submission tooling without having to recompute them.
-    """
-
-    fits_path: Path
-    label_path: Path | None
-    product_id: str
+# Legacy calibration aliases accepted by the old functional signature.
+_LEGACY_CALIBRATION = {"default": "pyuvis"}
 
 
 def build_cube(
@@ -37,36 +35,31 @@ def build_cube(
     write_pds4_label: bool = True,
     calibration: str = "default",
 ) -> CubeProduct:
-    """Build a Cassini UVIS PDS4 FITS cube for ``pds_product_id``.
+    """Build a Cassini UVIS PDS4 FITS cube for ``pds_product_id`` (production path).
 
     Parameters
     ----------
     pds_product_id
         Cassini UVIS PRODUCT_ID, e.g. ``"EUV2013_047_09_33_59"``. The raw
-        DAT/LBL pair will be fetched via :mod:`pyuvis` (which delegates
-        to :mod:`planetarypy.catalog.fetch_product`).
+        DAT/LBL pair will be fetched via :mod:`pyuvis` (which delegates to
+        :mod:`planetarypy.catalog.fetch_product`).
     geometry
-        Externally-computed geometry, keyed by FITS HDU name. Expected
-        keys: ``"SC_GEOM"``, ``"BODY_GEOM"``, ``"GENERAL_GEOM"``,
-        ``"RING_GEOM"``. Each value is a mapping of column name to
-        ``numpy.ndarray`` shaped per Mark's 2026-02 FITS layout
-        proposal (see ``refs/FITS-layout-proposal-MRS-2025-02-03.pdf``).
+        Externally-computed geometry, keyed by FITS HDU name (``"SC_GEOM"``,
+        ``"BODY_GEOM"``, ``"GENERAL_GEOM"``, ``"RING_GEOM"``). Each value maps a
+        column name to a ``numpy.ndarray`` shaped per Mark's 2026-02 FITS layout
+        proposal.
     spice_kernels
-        Filenames of SPICE kernels that were used to compute ``geometry``.
-        Will be written verbatim into the ``KERNELS`` ASCII-table HDU.
+        Filenames of SPICE kernels used to compute ``geometry``; written verbatim
+        into the ``KERNELS`` HDU.
     target
-        PDS target name, e.g. ``"TITAN"``, ``"SATURN"``, ``"ENCELADUS"``.
+        PDS target name, e.g. ``"TITAN"``.
     out_dir
-        Output directory. The FITS file is written as
-        ``<pds_product_id>.fits`` and the label as
-        ``<pds_product_id>.xml``.
+        Output directory. The FITS file is written as ``<pds_product_id>.fits``.
     write_pds4_label
         If ``True`` (default), emit a sibling PDS4 XML label.
     calibration
-        Which calibration pipeline to apply when building the calibrated
-        cube. ``"default"`` uses the current pyuvis recommended path
-        (Steffl row2row + Greg flatfield). Pass ``"none"`` to skip and
-        fill the primary HDU with the raw counts copy.
+        Calibration source. ``"default"`` maps to ``"pyuvis"``; see
+        :class:`~cubegenpy.config.BuildConfig`.
 
     Returns
     -------
@@ -76,9 +69,21 @@ def build_cube(
     Raises
     ------
     NotImplementedError
-        Until the algorithm port lands. See ``PORT_PLAN.md``.
+        The production ``PyuvisSource`` (fetch real PDS product + ingest the
+        Showalter geometry folder) is not built yet. Use
+        :class:`cubegenpy.builder.CubeBuilder` with
+        :class:`~cubegenpy.sources.SyntheticSource` or
+        :class:`~cubegenpy.sources.FitsReadbackSource` for the working paths.
     """
+    calibration = _LEGACY_CALIBRATION.get(calibration, calibration)
+    # Validate the requested config now (raises on unknown/regenerate) so the
+    # error is about the knobs, not the missing source, when that's the problem.
+    BuildConfig(calibration=calibration, write_pds4_label=write_pds4_label)
+
     raise NotImplementedError(
-        "cubegenpy is currently scaffolding only — see PORT_PLAN.md "
-        "for the implementation roadmap."
+        "build_cube's production path needs PyuvisSource (real PDS fetch + "
+        "Showalter geometry ingest), which is blocked on the geometry format. "
+        "Use CubeBuilder(SyntheticSource(...)) or "
+        "CubeBuilder(FitsReadbackSource(path), config=BuildConfig(calibration="
+        "'stored')) for the working build / recalibration paths."
     )

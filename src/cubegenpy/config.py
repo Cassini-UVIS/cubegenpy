@@ -7,7 +7,8 @@ those fields are obsolete here — geometry is external, the GUI is gone, and th
 legacy ``.sav``/ENVI/binary writers are replaced by the FITS writer. This frozen
 dataclass keeps only the knobs that still have meaning for the FITS pipeline.
 
-See ``PORT_PLAN.md`` §4 for the calibration-source decision this encodes.
+See ``PORT_PLAN.md`` §4 and ``Plans/so-the-basic-guide-twinkly-ritchie.md`` for
+the calibration-source and background decisions this encodes.
 """
 
 from __future__ import annotations
@@ -15,7 +16,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-CalibrationSource = Literal["pyuvis", "regenerate", "none"]
+from .calibrate import Background
+
+CalibrationSource = Literal["pyuvis", "stored", "regenerate", "none"]
 
 
 @dataclass(frozen=True)
@@ -27,18 +30,21 @@ class BuildConfig:
     calibration
         Where the calibrated cube + ``CAL_FACTOR`` come from:
 
-        * ``"pyuvis"`` (default) — read the archived, already-calibrated PDS
-          product via :mod:`pyuvis` (counts × PDS cal matrix → kR). Thin glue,
-          modern path, no cal-data-file management.
-        * ``"regenerate"`` — port of the IDL ``Get_UVIS_calibration`` ("Ultimate"
-          Greg Holsclaw time-varying cal); regenerates the cal factor
-          independently. Requires the calibration data files. Deferred — not yet
-          implemented.
-        * ``"none"`` — fill the primary HDU with the raw counts (passthrough),
-          for debugging.
-    subtract_background
-        Apply RTG / spectral-average background subtraction before calibration.
-        Off by default, exactly as the IDL ``pass.rtg`` / spectral-avg flags were.
+        * ``"pyuvis"`` (default) — derive the cal factor from the archived PDS
+          product via :mod:`pyuvis` (counts x PDS cal matrix -> kR). Thin glue,
+          modern path; not wired yet (blocked on real-data ingest).
+        * ``"stored"`` — recalibration: reuse the ``CAL_FACTOR`` read back from an
+          existing FITS verbatim and only re-apply the background offset. The
+          working path for :class:`~cubegenpy.sources.FitsReadbackSource`.
+        * ``"regenerate"`` — reserved seam for the ported IDL
+          ``Get_UVIS_calibration`` ("Ultimate" Greg Holsclaw time-varying cal) /
+          :class:`~cubegenpy.calibrate.SpicaCalModel`. Raises until implemented.
+        * ``"none"`` — debug passthrough: fill the primary HDU with counts/sec
+          (unit cal factor); the real ``CAL_FACTOR`` HDU is still written.
+    background
+        How much background to subtract before calibration, as a
+        :class:`~cubegenpy.calibrate.Background` value (not a bool, so it can carry
+        the RTG dark rate or a spectral-average band). Defaults to ``mode="none"``.
     write_pds4_label
         Emit the sibling draft PDS4 XML label.
     fits_version
@@ -46,23 +52,26 @@ class BuildConfig:
     """
 
     calibration: CalibrationSource = "pyuvis"
-    subtract_background: bool = False
+    background: Background = field(default_factory=Background)
     write_pds4_label: bool = True
     fits_version: float = 1.0
 
     def __post_init__(self) -> None:
-        if self.calibration not in ("pyuvis", "regenerate", "none"):
+        if self.calibration not in ("pyuvis", "stored", "regenerate", "none"):
             raise ValueError(f"unknown calibration source: {self.calibration!r}")
         if self.calibration == "regenerate":
             raise NotImplementedError(
-                "calibration='regenerate' (ported Get_UVIS_calibration) is not "
-                "implemented yet — see PORT_PLAN.md §4. Use 'pyuvis' for now."
+                "calibration='regenerate' (ported Get_UVIS_calibration / "
+                "SpicaCalModel seam) is not implemented yet — see PORT_PLAN.md §4. "
+                "Use 'pyuvis' (build) or 'stored' (recalibration)."
             )
 
     def summary(self) -> str:
         """One-line provenance string (successor to ``cg_settings_print``)."""
-        bg = "bg-sub" if self.subtract_background else "no-bg"
-        return f"cubegenpy[cal={self.calibration}, {bg}, v{self.fits_version}]"
+        return (
+            f"cubegenpy[cal={self.calibration}, bg={self.background.mode}, "
+            f"v{self.fits_version}]"
+        )
 
 
 DEFAULT_CONFIG = BuildConfig()
