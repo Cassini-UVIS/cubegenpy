@@ -24,6 +24,7 @@ from .skeleton import (
     write_skeleton,
 )
 from .sources import FitsReadbackSource, Source, SyntheticSource
+from .subsampling import NTOutOfRange, SubsamplingPolicy, smear_pixels
 from .template import Template, TemplateError
 from .template import load as load_template
 from .writer import Dims, build_hdulist, write_product
@@ -43,6 +44,10 @@ __all__ = [
     "check_skeleton",
     "is_skeleton",
     "SkeletonReport",
+    # NT policy
+    "SubsamplingPolicy",
+    "NTOutOfRange",
+    "smear_pixels",
     # data-definition workbook
     "load_template",
     "Template",

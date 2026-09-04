@@ -185,3 +185,66 @@ def test_extension_keywords_are_workbook_declared(skeleton):
         assert hdul["WAVELENGTH"].header["BUNIT"] == "Angstrom"
         assert "UNIT" not in hdul["WAVELENGTH"].header
         assert hdul["BACKGROUND"].header["BUNIT"] == "count/s"
+
+
+# --------------------------------------------------------------------------- #
+# NT policy
+# --------------------------------------------------------------------------- #
+
+def test_default_policy_honours_the_v2_floor():
+    from cubegenpy import SubsamplingPolicy
+
+    p = SubsamplingPolicy()
+    assert p.recommend(smear_pixels=0.0) == 3      # no smear -> begin/middle/end
+    assert p.recommend(smear_pixels=1.5) == 3      # still the floor
+    assert p.recommend(smear_pixels=6.2) == 8      # ceil(6.2/1)+1 fenceposts
+    assert p.recommend(smear_pixels=1e6) == 33     # clamped at the ceiling
+
+
+def test_policy_is_tunable():
+    from cubegenpy import SubsamplingPolicy
+
+    fine = SubsamplingPolicy(pixels_per_subsample=0.5, maximum=65)
+    assert fine.recommend(smear_pixels=6.2) == 14
+    coarse = SubsamplingPolicy(pixels_per_subsample=4.0)
+    assert coarse.recommend(smear_pixels=6.2) == 3
+
+
+def test_policy_refuses_to_go_below_the_proposal_floor():
+    from cubegenpy import NTOutOfRange, SubsamplingPolicy
+
+    with pytest.raises(NTOutOfRange, match="floor"):
+        SubsamplingPolicy(minimum=2)
+    with pytest.raises(NTOutOfRange, match="floor"):
+        SubsamplingPolicy().validate(2)
+
+
+def test_smear_helper():
+    from cubegenpy import smear_pixels
+
+    # 0.01 deg/s for 240 s at 0.25 deg/pixel -> 9.6 pixels
+    assert smear_pixels(0.01, 240.0, 0.25) == pytest.approx(9.6)
+
+
+def test_skeleton_records_nt_and_its_rule(tmp_path):
+    from cubegenpy import SubsamplingPolicy
+
+    policy = SubsamplingPolicy(pixels_per_subsample=0.5, maximum=65)
+    nt = policy.recommend(smear_pixels=6.2)
+    dims = Dims(NX=8, NY=4, NZ=2, NT=nt)
+    path = write_skeleton(tmp_path, "NT_TEST", dims=dims, header=HEADER,
+                          subsampling=policy, bodies=["SATURN"], resolved_bodies=[])
+    hdr = fits.getheader(path, 0)
+    assert "0.5px/sub" in hdr["NT_RULE"]
+    # NT itself is not a keyword -- it is read back from the backplane TDIM,
+    # which is the only place it is stated.
+    assert "NSUBSAMP" not in hdr
+    assert check_skeleton(path).dims.NT == nt == 14
+
+
+def test_skeleton_rejects_nt_outside_the_policy(tmp_path):
+    from cubegenpy import NTOutOfRange
+
+    with pytest.raises(NTOutOfRange):
+        write_skeleton(tmp_path, "BAD", dims=Dims(NX=8, NY=4, NZ=2, NT=2),
+                       header=HEADER, bodies=["SATURN"], resolved_bodies=[])

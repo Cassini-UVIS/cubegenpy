@@ -47,6 +47,7 @@ import numpy as np
 from astropy.io import fits
 
 from . import layout, writer
+from .subsampling import SubsamplingPolicy
 from .layout import (
     CAL_FACTOR_NULL,
     PIPESTAT_COMPLETE,
@@ -133,6 +134,7 @@ def write_skeleton(
     bodies: Sequence[str] = (),
     resolved_bodies: Sequence[str] = (),
     wavelength: np.ndarray | None = None,
+    subsampling: SubsamplingPolicy | None = None,
     rings_in_fov: bool = False,
     edge_on: bool = False,
     overwrite: bool = True,
@@ -154,10 +156,22 @@ def write_skeleton(
     wavelength
         Optional; NaN-filled if omitted, for the case where the wavelength
         solution is not yet known.
+    subsampling
+        The rule that chose ``dims.NT``. Used to validate the value and to
+        record its provenance in ``NT_RULE``; defaults to
+        :class:`~cubegenpy.subsampling.SubsamplingPolicy`. ``NT`` itself is
+        taken from ``dims`` -- the policy does not override an explicit choice,
+        it only refuses one outside its bounds.
     """
     geometry = dict(geometry or {})
-    hdr = {k: v for k, v in header.items() if k != "PIPESTAT"}
+    policy = subsampling or SubsamplingPolicy()
+    policy.validate(dims.NT)
+
+    hdr = {k: v for k, v in header.items() if k not in ("PIPESTAT", "NT_RULE")}
     hdr["PIPESTAT"] = PIPESTAT_SKELETON
+    # Only the rule, never the value: NT is already the last axis of every
+    # backplane TDIM, and a keyword repeating it could disagree with the data.
+    hdr["NT_RULE"] = policy.describe()
 
     shape = (dims.NX, dims.NY, dims.NZ)
     hdul = writer.build_hdulist(
