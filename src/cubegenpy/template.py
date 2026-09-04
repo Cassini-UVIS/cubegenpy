@@ -22,6 +22,7 @@ would otherwise produce a structurally valid archive with wrong null semantics.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -29,7 +30,7 @@ import pandas as pd
 
 from .layout import Column, HDUSpec, Keyword
 
-__all__ = ["load", "TemplateError", "Template"]
+__all__ = ["load", "TemplateError", "Template", "HDUKeyword"]
 
 # Package-data copy; falls back to the repo's data_definition/ during development.
 _PACKAGED = Path(__file__).parent / "templates" / "UVIS_data_definition_v0.5.xlsx"
@@ -54,13 +55,44 @@ _DTYPES: dict[str, tuple[str, int]] = {
 _PRESENCE = {"always": "always", "always_degenerate": "rings_in_fov"}
 
 
-class Template:
-    """The loaded workbook: HDU specs plus the primary-header keyword list."""
+@dataclass(frozen=True)
+class HDUKeyword:
+    """A keyword stamped on an *extension* header.
 
-    def __init__(self, path: Path, hdus: list[HDUSpec], keywords: tuple[Keyword, ...]):
+    ``source`` is ``literal:<value>`` (the workbook supplies the value) or
+    ``computed:<name>`` (the writer supplies it at build time, keyed by name).
+    """
+
+    extname: str
+    name: str
+    kind: str
+    source: str
+    comment: str
+
+    @property
+    def literal(self) -> str | None:
+        return (self.source.split(":", 1)[1]
+                if self.source.startswith("literal:") else None)
+
+    @property
+    def computed_key(self) -> str | None:
+        return (self.source.split(":", 1)[1]
+                if self.source.startswith("computed:") else None)
+
+
+class Template:
+    """The loaded workbook: HDU specs, primary keywords, extension keywords."""
+
+    def __init__(self, path: Path, hdus: list[HDUSpec], keywords: tuple[Keyword, ...],
+                 hdu_keywords: tuple[HDUKeyword, ...] = ()):
         self.path = path
         self._hdus = hdus
         self.keywords = keywords
+        self._hdu_keywords = hdu_keywords
+
+    def hdu_keywords(self, extname: str) -> tuple[HDUKeyword, ...]:
+        """Extension-header keywords declared for ``extname``."""
+        return tuple(k for k in self._hdu_keywords if k.extname == extname)
 
     def hdu_specs(self, *, rings_in_fov: bool = False,
                   edge_on: bool = False) -> list[HDUSpec]:
@@ -185,4 +217,18 @@ def load(path: str | Path | None = None) -> Template:
         )
         for _, r in kw_df.iterrows()
     )
-    return Template(path, specs, keywords)
+    hk: list[HDUKeyword] = []
+    if "hdu_keywords" in xl.sheet_names:
+        for _, r in _sheet(xl, "hdu_keywords").iterrows():
+            hk.append(HDUKeyword(
+                extname=str(r.extname).strip(),
+                name=str(r.keyword).strip(),
+                kind=str(r.value_type).strip(),
+                source=str(r.source).strip(),
+                comment=str(r.comment).strip()[:45],
+            ))
+        known = {s.name for s in specs}
+        if bad := {k.extname for k in hk} - known:
+            raise TemplateError(f"hdu_keywords names unknown HDUs: {sorted(bad)}")
+
+    return Template(path, specs, keywords, tuple(hk))

@@ -67,6 +67,34 @@ def primary_keywords() -> tuple[Keyword, ...]:
     except Exception:  # noqa: BLE001
         return layout.PRIMARY_KEYWORDS
 
+def _apply_hdu_keywords(hdu, extname: str, computed: dict | None = None) -> None:
+    """Stamp the extension-header keywords the workbook declares for `extname`.
+
+    Values come from the sheet for ``literal:`` sources and from `computed` for
+    ``computed:`` ones, mirroring how the primary header is populated. Keeping
+    the inventory in the workbook means everything in the file is described
+    there rather than hidden in this module.
+    """
+    try:
+        from .template import load
+        declared = load().hdu_keywords(extname)
+    except Exception:  # noqa: BLE001 - workbook optional; see hdu_specs()
+        return
+
+    computed = computed or {}
+    casts = {"int": int, "float": float, "bool": bool, "str": str}
+    for kw in declared:
+        if (lit := kw.literal) is not None:
+            value = casts.get(kw.kind, str)(lit)
+        elif (key := kw.computed_key) is not None:
+            if key not in computed:
+                continue
+            value = computed[key]
+        else:
+            continue
+        hdu.header[kw.name] = (value, kw.comment)
+
+
 def _to_fits_order(arr: np.ndarray) -> np.ndarray:
     """Reverse axes so the FITS file matches the proposal's NAXIS order.
 
@@ -129,8 +157,10 @@ def _raw_counts_hdu(raw_counts, *, on_overflow: str = "widen") -> fits.ImageHDU:
 
     out = np.where(is_null, RAW_COUNTS_BLANK, arr).astype(dtype)
     hdu = fits.ImageHDU(_to_fits_order(out), name="RAW_COUNTS")
-    hdu.header["BLANK"] = (RAW_COUNTS_BLANK, "Value denoting an undefined count")
-    hdu.header["RAWWIDEN"] = (widened, "Counts exceeded int16; stored as int32")
+    _apply_hdu_keywords(hdu, "RAW_COUNTS", {"raw_widened": widened})
+    # BLANK is declared in the workbook, but the writer must not depend on the
+    # workbook being present to emit a correct null declaration.
+    hdu.header.setdefault("BLANK", RAW_COUNTS_BLANK)
     return hdu
 
 
@@ -313,7 +343,9 @@ def build_hdulist(
             bg = (np.full((dims.NX, dims.NY), np.nan, dtype=np.float32)
                   if background is None
                   else np.asarray(background, dtype=np.float32))
-            hdus.append(fits.ImageHDU(_to_fits_order(bg), name="BACKGROUND"))
+            bhdu = fits.ImageHDU(_to_fits_order(bg), name="BACKGROUND")
+            _apply_hdu_keywords(bhdu, "BACKGROUND")
+            hdus.append(bhdu)
         elif spec.name == "RAW_COUNTS":
             hdus.append(_raw_counts_hdu(raw_counts, on_overflow=on_overflow))
         elif spec.name == "CAL_FACTOR":
@@ -324,7 +356,8 @@ def build_hdulist(
             hdus.append(ihdu)
         elif spec.name == "WAVELENGTH":
             whdu = fits.ImageHDU(np.asarray(wavelength, dtype=np.float32), name="WAVELENGTH")
-            whdu.header["BUNIT"] = "Angstrom"
+            _apply_hdu_keywords(whdu, "WAVELENGTH")
+            whdu.header.setdefault("BUNIT", "Angstrom")
             hdus.append(whdu)
         elif spec.name == "KERNELS":
             rows = {

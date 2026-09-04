@@ -161,3 +161,27 @@ def test_stage2_preserves_everything_stage1_wrote(skeleton, tmp_path):
         for col in arr.dtype.names:
             assert np.array_equal(arr[col], got[col]), f"{ext}.{col}"
     assert not np.all(np.isnan(fits.getdata(out, 0)))
+
+
+# --------------------------------------------------------------------------- #
+# Extension-header keywords come from the workbook too
+# --------------------------------------------------------------------------- #
+
+def test_extension_keywords_are_workbook_declared(skeleton):
+    """BLANK/RAWWIDEN/BUNIT are declared in the hdu_keywords sheet, not hardcoded."""
+    from cubegenpy import load_template
+
+    t = load_template()
+    declared = {(k.extname, k.name) for k in
+                (*t.hdu_keywords("RAW_COUNTS"), *t.hdu_keywords("WAVELENGTH"),
+                 *t.hdu_keywords("BACKGROUND"))}
+    assert {("RAW_COUNTS", "BLANK"), ("RAW_COUNTS", "RAWWIDEN"),
+            ("WAVELENGTH", "BUNIT"), ("BACKGROUND", "BUNIT")} <= declared
+
+    with fits.open(skeleton) as hdul:
+        assert hdul["RAW_COUNTS"].header["BLANK"] == -1
+        assert hdul["RAW_COUNTS"].header["RAWWIDEN"] is False
+        # BUNIT, not UNIT: the FITS-reserved spelling (see the plan, C.9 #1).
+        assert hdul["WAVELENGTH"].header["BUNIT"] == "Angstrom"
+        assert "UNIT" not in hdul["WAVELENGTH"].header
+        assert hdul["BACKGROUND"].header["BUNIT"] == "count/s"
