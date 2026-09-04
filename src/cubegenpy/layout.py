@@ -1,11 +1,16 @@
-"""Declarative spec for the new Cassini UVIS PDS4 FITS layout.
+"""The **v1 baseline** layout spec, kept as a fallback and a test fixture.
 
-This module encodes Mark Showalter's *FITS-layout-proposal-MRS-2025-02-03*
-(the "v0.4" redesign) as plain data, so the writer in :mod:`cubegenpy.writer`
-stays dumb: it just walks these specs. Keeping the layout here (rather than a
-spreadsheet, for this draft) means a reviewer can read the whole proposal as
-Python and the team can retune it in one place once the telecon settles the
-open questions.
+.. note::
+   This module is no longer the source of truth. The FITS layout is defined by
+   the data-definition workbook, loaded through :mod:`cubegenpy.template`, which
+   carries Showalter's **v2** proposal (12 Aug 2026). Use
+   :func:`cubegenpy.writer.hdu_specs` / :func:`~cubegenpy.writer.primary_keywords`
+   to get the live specs; they fall back to this module only when the workbook
+   cannot be read, and warn when they do.
+
+   What remains here encodes the *v1* proposal (3 Feb 2026). It survives because
+   it is dependency-free — no pandas, no openpyxl — and because it is a
+   known-good baseline to test the workbook loader against.
 
 Dimension tokens used in ``tdim`` (given in **FITS order**, fastest-varying
 axis first, exactly as the proposal writes them):
@@ -16,11 +21,28 @@ axis first, exactly as the proposal writes them):
 * ``NT`` — sub-samples per readout (begin/middle/end), typically 3
 * ``"5"`` — pixel sampling: centre + 4 corners (backplanes)
 
-A few proposal typos are corrected here deliberately (see PORT notes in the
-module docstrings): the EXTNAMEs come from the section headings, not the
-copy-pasted ``EXTNAME='BODY_GEOM'`` in every header dump; ``RAW_COUNTS`` is
-uint16 (raw counts are unsigned 0-65535; the prose "16-bit float" is wrong and
-signed int16 would overflow); ``IMG_YMAX`` is the slit *max*.
+Two proposal typos are corrected here deliberately: the EXTNAMEs come from the
+section headings, not the copy-pasted ``EXTNAME='BODY_GEOM'`` in every header
+dump; and ``IMG_YMAX`` is the slit *max*.
+
+``RAW_COUNTS`` dtype — reversed
+-------------------------------
+This module used to argue for **uint16**, on the grounds that raw counts are
+unsigned 0-65535 and signed int16 would overflow. That reasoning was about FITS
+alone and is wrong once PDS4 is considered.
+
+FITS writes unsigned 16-bit as ``BITPIX=16`` + ``BZERO=32768``, which is *offset
+binary*: physical 0 becomes ``0x8000`` and 65535 becomes ``0x7FFF``, so no byte
+matches the PDS3 encoding. PDS4 would then have to restate the offset as
+``Element_Array/value_offset``, describing the same transformation twice — once
+in the FITS header, once in the label — and a reader honouring both applies it
+twice. Since PDS4 requires the label alone to be sufficient, the file must carry
+exactly one description of its values.
+
+So the writer emits **signed** integers with no offset and no scaling, widening
+an individual product to int32 only when a real count exceeds 32767. See
+:func:`cubegenpy.writer._raw_counts_hdu`. Values at or below 32767 keep their
+exact PDS3 bytes as a side benefit.
 """
 
 from __future__ import annotations
@@ -171,7 +193,7 @@ def hdu_specs(*, rings_in_fov: bool = False, edge_on: bool = False) -> list[HDUS
         HDUSpec("PRIMARY", "PRIMARY", "singleton",
                 description="Calibrated spectral cube (NX, NY, NZ)."),
         HDUSpec("RAW_COUNTS", "IMAGE", "singleton",
-                description="Raw detector counts, uint16 (NX, NY, NZ)."),
+                description="Raw detector counts, signed int16/int32 (NX, NY, NZ)."),
         HDUSpec("CAL_FACTOR", "IMAGE", "singleton",
                 description=f"Calibration factor (NX, NY); NULL={CAL_FACTOR_NULL:g}."),
         HDUSpec("WAVELENGTH", "IMAGE", "singleton",

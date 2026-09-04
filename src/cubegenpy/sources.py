@@ -76,8 +76,9 @@ class SyntheticSource:
         product_id = self.product_id
         rng = np.random.default_rng(0)
 
-        # Raw UVIS counts are unsigned 16-bit (0-65535); keep them uint16 so a
-        # readback round-trips bit-identically (writer finding #1).
+        # PDS3 raw counts are unsigned 16-bit (0-65535), which is the caller-side
+        # convention ProductInputs documents. The writer encodes them as signed
+        # on disk; fitsio inverts that, so a readback still round-trips.
         raw = (rng.random((dims.NX, dims.NY, dims.NZ)) * 1000).astype(np.uint16)
 
         cal = rng.random((dims.NX, dims.NY)).astype(np.float32)
