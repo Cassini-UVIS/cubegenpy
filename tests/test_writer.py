@@ -40,21 +40,24 @@ def test_primary_is_float32_cube(product):
     hdul, _ = product
     prim = hdul[0]
     assert _is(prim.data.dtype, "f", 4)            # ISC-1
-    assert prim.data.shape == (D.NX, D.NY, D.NZ)   # (NX, NY, NZ)
+    # Proposal p.3: NAXIS1=wavelengths, NAXIS2=slit, NAXIS3=time steps.
+    # numpy sees that reversed, matching PDS3 AXIS_NAME=(BAND,LINE,SAMPLE).
+    assert prim.data.shape == (D.NZ, D.NY, D.NX)
+    assert prim.header['NAXIS1'] == D.NX
 
 
-def test_raw_counts_is_int16(product):
+def test_raw_counts_is_uint16(product):
     hdul, _ = product
     raw = hdul["RAW_COUNTS"]
-    assert _is(raw.data.dtype, "i", 2)             # ISC-2
-    assert raw.data.shape == (D.NX, D.NY, D.NZ)
+    assert _is(raw.data.dtype, "u", 2)             # ISC-2 (raw counts are unsigned)
+    assert raw.data.shape == (D.NZ, D.NY, D.NX)
 
 
 def test_cal_factor_2d_with_null(product):
     hdul, _ = product
     cal = hdul["CAL_FACTOR"]
     assert _is(cal.data.dtype, "f", 4)             # ISC-3
-    assert cal.data.shape == (D.NX, D.NY)
+    assert cal.data.shape == (D.NY, D.NX)
     assert not np.isnan(cal.data).any()
     assert (cal.data == CAL_FACTOR_NULL).any()    # ISC-4 (NaN -> -1000)
 
@@ -140,13 +143,23 @@ def test_label_emitted(product):
     assert paths["label"].suffix == ".xml"
 
 
-def test_rings_conditional_off():
-    """RING_GEOM absent when rings are not in the FOV (ISC-9)."""
+def test_rings_present_even_without_rings_in_fov():
+    """RING_GEOM is always present under v2, degenerate rather than absent.
+
+    v1 omitted the HDU when no rings were in the field of view. v2 fixes it at
+    index 7 and says (p.14) "It always contains one row", with the empty-TDIM
+    fallback collapsing the arrays to a scalar NaN instead. Keeping the HDU is
+    what holds every later HDU index constant across the archive.
+
+    Still pending confirmation from Showalter -- see the plan, section C.1.
+    """
     import tempfile
 
     with tempfile.TemporaryDirectory() as d:
         paths = make_synthetic_product(d, product_id="EUV_NORINGS",
                                        rings_in_fov=False, write_label=False)
         with fits.open(paths["fits"]) as hdul:
-            names = {h.header.get("EXTNAME") for h in hdul}
-        assert "RING_GEOM" not in names
+            names = [h.header.get("EXTNAME") for h in hdul]
+        assert "RING_GEOM" in names
+        # HDU order is fixed by v2; the ring case must not shift it.
+        assert names[8:] == ["KERNELS", "WAVELENGTH"]

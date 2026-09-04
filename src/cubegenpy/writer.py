@@ -31,6 +31,41 @@ from astropy.io import fits
 from . import layout
 from .layout import CAL_FACTOR_NULL, Column, HDUSpec, Keyword
 
+
+def hdu_specs(*, rings_in_fov: bool = False, edge_on: bool = False) -> list[HDUSpec]:
+    """HDU specs from the data-definition workbook, falling back to `layout`.
+
+    The workbook is the source of truth for the format (it carries Showalter's
+    v2 plan); the hardcoded tuples in :mod:`cubegenpy.layout` remain as the v1
+    baseline for environments without the workbook or pandas.
+    """
+    try:
+        from .template import load
+        return load().hdu_specs(rings_in_fov=rings_in_fov, edge_on=edge_on)
+    except Exception:  # noqa: BLE001 - any load failure falls back to v1
+        return layout.hdu_specs(rings_in_fov=rings_in_fov, edge_on=edge_on)
+
+
+def primary_keywords() -> tuple[Keyword, ...]:
+    """Primary-header keyword list, workbook-driven with a `layout` fallback."""
+    try:
+        from .template import load
+        return load().keywords
+    except Exception:  # noqa: BLE001
+        return layout.PRIMARY_KEYWORDS
+
+def _to_fits_order(arr: np.ndarray) -> np.ndarray:
+    """Reverse axes so the FITS file matches the proposal's NAXIS order.
+
+    The proposal specifies the data arrays fastest-axis-first --
+    ``NAXIS1``=wavelengths, ``NAXIS2``=slit, ``NAXIS3``=time steps (p.3) -- and
+    notes that this "is reversed for C and Python" (p.4). Callers work in the
+    natural numpy order ``(NX, NY, NZ)``, which is also what ``pyuvis`` returns,
+    so the reversal happens here at the boundary and nowhere else.
+    """
+    return np.ascontiguousarray(arr.T)
+
+
 _KIND_TO_NP = {"float32": np.float32, "float64": np.float64, "bool": np.bool_}
 _KIND_TO_CODE = {"float32": "E", "float64": "D", "bool": "L"}
 
@@ -140,15 +175,15 @@ def _fmt_date(value: str) -> str:
 
 
 def _build_primary(cube: np.ndarray, header_values: Mapping[str, object]) -> fits.PrimaryHDU:
-    hdu = fits.PrimaryHDU(data=np.asarray(cube, dtype=np.float32))
+    hdu = fits.PrimaryHDU(data=_to_fits_order(np.asarray(cube, dtype=np.float32)))
     hdr = hdu.header
-    for kw in layout.PRIMARY_KEYWORDS:
+    for kw in primary_keywords():
         if kw.name not in header_values:
             continue
         hdr[kw.name] = (_coerce_keyword(kw, header_values[kw.name]), kw.comment)
         if kw.unit:
             hdr.comments[kw.name] = f"[{kw.unit}] {kw.comment}"
-    hdr["COMMENT"] = "Calibrated data array (NX, NY, NZ); see PDS4 label."
+    hdr["COMMENT"] = "Calibrated data array (NAXIS1=NX); see PDS4 label."
     return hdu
 
 
@@ -174,6 +209,7 @@ def build_hdulist(
     raw_counts: np.ndarray,
     cal_factor: np.ndarray,
     wavelength: np.ndarray,
+    background: np.ndarray | None = None,
     header: Mapping[str, object],
     geometry: Mapping[str, Mapping[str, object]],
     kernels: Sequence[tuple[str, str]],
@@ -195,18 +231,30 @@ def build_hdulist(
         # Proposal p.6: always include Saturn in SC_GEOM even if outside the FOV.
         bodies = [*bodies, "SATURN"]
 
-    specs = layout.hdu_specs(rings_in_fov=rings_in_fov, edge_on=edge_on)
+    specs = hdu_specs(rings_in_fov=rings_in_fov, edge_on=edge_on)
     hdus: list[fits.hdu.base._BaseHDU] = []
 
     for spec in specs:
         if spec.name == "PRIMARY":
             hdus.append(_build_primary(cube, header))
+        elif spec.name == "BACKGROUND":
+            # v2 HDU 3: values subtracted from RAW_COUNTS before CAL_FACTOR.
+            # Not yet produced by the calibrator, so a NaN plane of the right
+            # shape holds the slot rather than a misleading zero plane.
+            bg = (np.full((dims.NX, dims.NY), np.nan, dtype=np.float32)
+                  if background is None
+                  else np.asarray(background, dtype=np.float32))
+            hdus.append(fits.ImageHDU(_to_fits_order(bg), name="BACKGROUND"))
         elif spec.name == "RAW_COUNTS":
-            hdus.append(fits.ImageHDU(np.asarray(raw_counts, dtype=np.int16), name="RAW_COUNTS"))
+            # Raw UVIS counts are unsigned 16-bit (0-65535); int16 would overflow
+            # above 32767. astropy writes BITPIX=16 + BZERO=32768 for uint16.
+            hdus.append(fits.ImageHDU(
+                _to_fits_order(np.asarray(raw_counts, dtype=np.uint16)),
+                name="RAW_COUNTS"))
         elif spec.name == "CAL_FACTOR":
             cf = np.array(cal_factor, dtype=np.float32)  # own a float32 copy
             cf[np.isnan(cf)] = CAL_FACTOR_NULL           # fill NULL in place
-            ihdu = fits.ImageHDU(cf, name="CAL_FACTOR")
+            ihdu = fits.ImageHDU(_to_fits_order(cf), name="CAL_FACTOR")
             ihdu.header["NULLVAL"] = (CAL_FACTOR_NULL, "Value flagging an undefined entry")
             hdus.append(ihdu)
         elif spec.name == "WAVELENGTH":

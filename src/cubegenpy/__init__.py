@@ -15,7 +15,17 @@ from .config import DEFAULT_CONFIG, BuildConfig
 from .demo import make_synthetic_product
 from .fitsio import read_product
 from .product import CubeProduct, ProductInputs
+from .skeleton import (
+    SkeletonReport,
+    calibrated_header,
+    check_skeleton,
+    geometry_contract,
+    is_skeleton,
+    write_skeleton,
+)
 from .sources import FitsReadbackSource, Source, SyntheticSource
+from .template import Template, TemplateError
+from .template import load as load_template
 from .writer import Dims, build_hdulist, write_product
 
 __all__ = [
@@ -26,6 +36,17 @@ __all__ = [
     "read_product",
     "Dims",
     "make_synthetic_product",
+    # stage 1: geometry-only skeleton
+    "write_skeleton",
+    "calibrated_header",
+    "geometry_contract",
+    "check_skeleton",
+    "is_skeleton",
+    "SkeletonReport",
+    # data-definition workbook
+    "load_template",
+    "Template",
+    "TemplateError",
     # OO core
     "CubeBuilder",
     "BuildConfig",

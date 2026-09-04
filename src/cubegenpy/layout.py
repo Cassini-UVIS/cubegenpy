@@ -19,7 +19,8 @@ axis first, exactly as the proposal writes them):
 A few proposal typos are corrected here deliberately (see PORT notes in the
 module docstrings): the EXTNAMEs come from the section headings, not the
 copy-pasted ``EXTNAME='BODY_GEOM'`` in every header dump; ``RAW_COUNTS`` is
-int16 (the prose "16-bit float" is wrong); ``IMG_YMAX`` is the slit *max*.
+uint16 (raw counts are unsigned 0-65535; the prose "16-bit float" is wrong and
+signed int16 would overflow); ``IMG_YMAX`` is the slit *max*.
 """
 
 from __future__ import annotations
@@ -28,6 +29,17 @@ from dataclasses import dataclass, field
 
 # Sentinel marking an undefined CAL_FACTOR entry (proposal p.4).
 CAL_FACTOR_NULL = -1000.0
+
+# PDS3 stores raw-count nulls as 65535 (the label's "-1" is wrong; proposal p.5
+# says so too). Reused as the skeleton placeholder so an unfilled RAW_COUNTS
+# reads as "no data" rather than as a plausible zero count.
+RAW_COUNTS_NULL = 65535
+
+# Values of the PIPESTAT keyword, which records how far a product has been
+# through the pipeline. A geometry-only product is structurally complete and
+# indistinguishable from a finished one without this.
+PIPESTAT_SKELETON = "GEOMETRY_ONLY"
+PIPESTAT_COMPLETE = "CALIBRATED"
 
 
 @dataclass(frozen=True)
@@ -153,7 +165,7 @@ def hdu_specs(*, rings_in_fov: bool = False, edge_on: bool = False) -> list[HDUS
         HDUSpec("PRIMARY", "PRIMARY", "singleton",
                 description="Calibrated spectral cube (NX, NY, NZ)."),
         HDUSpec("RAW_COUNTS", "IMAGE", "singleton",
-                description="Raw detector counts, int16 (NX, NY, NZ)."),
+                description="Raw detector counts, uint16 (NX, NY, NZ)."),
         HDUSpec("CAL_FACTOR", "IMAGE", "singleton",
                 description=f"Calibration factor (NX, NY); NULL={CAL_FACTOR_NULL:g}."),
         HDUSpec("WAVELENGTH", "IMAGE", "singleton",
@@ -215,6 +227,7 @@ PRIMARY_KEYWORDS: tuple[Keyword, ...] = (
     Keyword("INT_TIME", "float", "s", "Integration time"),
     Keyword("SLITANGL", "float", "deg", "Slit angle projected on sky"),
     Keyword("UNIT", "str", comment="Calibrated units of the data array"),
+    Keyword("PIPESTAT", "str", comment="GEOMETRY_ONLY or CALIBRATED"),
 )
 
 
