@@ -2,6 +2,23 @@
 
 <!-- do not remove -->
 
+## 0.2.1 — Correct null value in widened RAW_COUNTS
+
+### Fixes
+* The PDS3 null (65535) was not always becoming the proposal's `-1` on write.
+  `np.where(is_null, -1, uint16_array)` is unsafe: numpy >= 2.5 raises
+  `OverflowError`, and numpy < 2.5 silently wraps `-1` to 65535. The wrap
+  double-wraps back to `-1` when narrowing to int16 — correct by accident — but
+  survives as **65535 when widening to int32**, so every product that overflowed
+  int16 carried a null the `BLANK` keyword misdescribes, with no error anywhere.
+
+  The array is now widened to int32 before the null is inserted, then narrowed.
+  A regression test asserts the null *value* in both integer widths, rather than
+  the absence of a crash, since the absence of a crash is what hid this: the
+  suite passed on numpy 2.4.6 locally while failing on 2.5.2 in CI.
+
+  Affects only products with counts above 32,767 — the ~90 in Showalter's list.
+
 ## 0.2.0 — Workbook-driven writer, v2 layout, metadata skeleton
 
 The package now writes a complete, proposal-shaped product. The layout is no
