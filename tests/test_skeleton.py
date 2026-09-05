@@ -248,3 +248,30 @@ def test_skeleton_rejects_nt_outside_the_policy(tmp_path):
     with pytest.raises(NTOutOfRange):
         write_skeleton(tmp_path, "BAD", dims=Dims(NX=8, NY=4, NZ=2, NT=2),
                        header=HEADER, bodies=["SATURN"], resolved_bodies=[])
+
+
+def test_null_is_minus_one_in_both_integer_widths():
+    """The PDS3 null (65535) must become -1 whether or not the product widens.
+
+    Regression guard: np.where(is_null, -1, uint16_array) raises OverflowError on
+    numpy >= 2.5 and silently wraps on older numpy -- where the wrap happens to
+    cancel for int16 but leaves 65535 in the int32 branch. Local tests passed
+    while CI failed, so this asserts the value rather than the absence of a crash.
+    """
+    import warnings
+
+    from cubegenpy.layout import RAW_COUNTS_NULL
+    from cubegenpy.writer import _raw_counts_hdu
+
+    for peak, expected_bitpix in [(1200, 16), (60000, 32)]:
+        arr = np.full((2, 2, 2), 1200, dtype=np.uint16)
+        arr[0, 0, 0] = RAW_COUNTS_NULL
+        arr[1, 1, 1] = peak
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            hdu = _raw_counts_hdu(arr)
+        assert hdu.header["BITPIX"] == expected_bitpix
+        assert hdu.header["BLANK"] == -1
+        # the null cell, and only it, carries -1
+        assert (hdu.data == -1).sum() == 1
+        assert hdu.data.max() == peak

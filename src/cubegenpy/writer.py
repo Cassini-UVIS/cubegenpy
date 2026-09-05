@@ -183,7 +183,14 @@ def _raw_counts_hdu(raw_counts, *, on_overflow: str = "widen") -> fits.ImageHDU:
     else:
         dtype, widened = np.int16, False
 
-    out = np.where(is_null, RAW_COUNTS_BLANK, arr).astype(dtype)
+    # Widen to a signed type that can hold every uint16 value BEFORE inserting
+    # the negative null, then narrow. np.where(is_null, -1, uint16_array) is not
+    # safe: numpy >= 2.5 raises OverflowError, and numpy < 2.5 silently wraps -1
+    # to 65535 -- which double-wraps back to -1 for int16 (right by accident) but
+    # stays 65535 for int32 (wrong, and silent).
+    out = arr.astype(np.int32, copy=True)
+    out[is_null] = RAW_COUNTS_BLANK
+    out = out.astype(dtype, copy=False)
     hdu = fits.ImageHDU(_to_fits_order(out), name="RAW_COUNTS")
     _apply_hdu_keywords(hdu, "RAW_COUNTS", {"raw_widened": widened})
     # BLANK is declared in the workbook, but the writer must not depend on the
