@@ -1,0 +1,116 @@
+---
+title: Recalibrating a product
+jupyter: python3
+---
+
+
+This is the **user-time stream**. Someone has a finished product and wants it
+calibrated differently. They do not refetch anything and they do not recompute
+geometry: the file already carries every input needed.
+
+As it stands, recalibration changes one thing, the background offset. The
+calibration factor is reused verbatim, which is what `calibration="stored"`
+means.
+
+
+```{python}
+from pathlib import Path
+
+import numpy as np
+from astropy.io import fits
+
+from cubegenpy import (
+    Background,
+    BuildConfig,
+    CubeBuilder,
+    FitsReadbackSource,
+    SyntheticSource,
+    read_product,
+)
+
+OUT = Path("products")
+```
+
+## 1. Start from a finished product
+
+Standing in for one the user downloaded.
+
+```{python}
+original = CubeBuilder(
+    SyntheticSource(), config=BuildConfig(calibration="stored")
+).build(OUT / "original")
+
+print(original.fits_path)
+```
+
+## 2. Read it back
+
+`read_product` reverses everything the writer did: the FITS axis order, the
+recoded null in `RAW_COUNTS`, the table shapes. What comes back is a
+`ProductInputs`, the same payload a source produces.
+
+```{python}
+inputs = read_product(original.fits_path)
+
+print("cube       ", inputs.cube.shape, inputs.cube.dtype)
+print("raw_counts ", inputs.raw_counts.shape, inputs.raw_counts.dtype)
+print("cal_factor ", inputs.cal_factor.shape, inputs.cal_factor.dtype)
+print("geometry   ", {k: len(v) for k, v in inputs.geometry.items()})
+print("header keys", len(inputs.header))
+```
+
+## 3. Rebuild with a background subtraction
+
+The radioisotope thermoelectric generator contributes a roughly constant dark
+rate. `Background` carries it as a value rather than a flag, which is why the
+rate itself can be stated here.
+
+```{python}
+background = Background(mode="rtg", rtg_value=0.001)
+
+recalibrated = CubeBuilder(
+    FitsReadbackSource(original.fits_path),
+    config=BuildConfig(calibration="stored", background=background),
+).build(OUT / "recalibrated")
+
+print(recalibrated.fits_path)
+```
+
+## 4. Check that only the science changed
+
+This is the claim worth testing: the offset moves the calibrated cube by exactly
+`-offset * cal_factor`, and touches nothing else in the file.
+
+```{python}
+after = read_product(recalibrated.fits_path)
+
+delta = after.cube - inputs.cube
+expected = np.nan_to_num(-background.rtg_value * inputs.cal_factor[:, :, np.newaxis])
+
+print("cube moved by exactly -offset * cal_factor:",
+      np.allclose(delta, expected, atol=1e-5))
+```
+
+```{python}
+print("raw_counts unchanged:", np.array_equal(after.raw_counts, inputs.raw_counts))
+print("cal_factor unchanged:", np.array_equal(np.nan_to_num(after.cal_factor),
+                                              np.nan_to_num(inputs.cal_factor)))
+print("wavelength unchanged:", np.array_equal(after.wavelength, inputs.wavelength))
+print("kernels unchanged   :", list(after.kernels) == list(inputs.kernels))
+
+same_geometry = all(
+    np.array_equal(np.nan_to_num(np.asarray(after.geometry[hdu][column])),
+                   np.nan_to_num(np.asarray(columns[column])))
+    for hdu, columns in inputs.geometry.items()
+    for column in columns
+)
+print("geometry unchanged  :", same_geometry)
+```
+
+## 5. Why "stored" is the right choice here
+
+The alternative would be to regenerate the calibration factor. That is a
+different question from "subtract a bit more background", and it would change
+numbers the user did not ask about. Reusing the stored factor keeps the
+recalibration honest: one input changed, one output moved.
+

@@ -1,0 +1,116 @@
+---
+title: Building a product
+jupyter: python3
+---
+
+
+This is the **archive-creation stream**, end to end: science arrays plus metadata
+and backplanes go in, one PDS4-shaped FITS product comes out.
+
+The science arrays here are synthetic. The real stream reads them from a Cassini
+UVIS PDS product, and the metadata and backplanes arrive already computed from
+Showalter's pipeline. Nothing below changes when that happens: only the
+`Source` is swapped. That is the whole point
+of the seam.
+
+
+```{python}
+from pathlib import Path
+
+import numpy as np
+from astropy.io import fits
+
+from cubegenpy import BuildConfig, CubeBuilder, SyntheticSource, read_product
+
+OUT = Path("products")
+```
+
+## 1. The source
+
+A `Source` produces one `ProductInputs`, the single payload the rest of the
+pipeline moves around. Its field names match the writer's arguments one for one.
+
+```{python}
+source = SyntheticSource()
+inputs = source.load()
+
+for name in ("raw_counts", "cal_factor", "wavelength", "cube"):
+    value = getattr(inputs, name)
+    shape = "None (the calibrator fills it)" if value is None else f"{value.shape} {value.dtype}"
+    print(f"{name:12} {shape}")
+
+print()
+print("dims        ", inputs.dims)
+print("geometry    ", {k: len(v) for k, v in inputs.geometry.items()})
+```
+
+`cube` is the only field a source may leave empty. Everything else is input.
+
+Note the conventions: `raw_counts` is **uint16** in the PDS3 sense, where 65535
+is the null rather than a count, and `wavelength` is in **Angstrom** even though
+pyuvis hands back nanometres.
+
+## 2. Configure the build
+
+`BuildConfig` carries the two knobs that matter: where the calibration factor
+comes from, and how much background to subtract first.
+
+Here the synthetic source already carries a `CAL_FACTOR`, so `"stored"` reuses it
+verbatim. The archive stream will use `"pyuvis"` once the real reader lands.
+
+```{python}
+config = BuildConfig(calibration="stored")
+print(config.summary())
+print("background mode:", config.background.mode)
+```
+
+## 3. Build
+
+```{python}
+product = CubeBuilder(source, config=config).build(OUT)
+print("fits :", product.fits_path)
+print("label:", product.label_path)
+```
+
+## 4. What landed
+
+```{python}
+with fits.open(product.fits_path) as hdul:
+    hdul.info()
+```
+
+```{python}
+with fits.open(product.fits_path) as hdul:
+    header = hdul[0].header
+    for keyword in ("PROD_ID", "MISSION", "INSTRUME", "CHANNEL", "TARGET", "OBS_UTC", "INT_TIME"):
+        print(f"{keyword:9} = {header[keyword]!r}")
+```
+
+## 5. The calibration, in the open
+
+The whole formula is one line, and it runs entirely in counts per second:
+
+    calibrated = (raw_counts / int_time - background_offset) * cal_factor
+
+Worth reproducing by hand once, so nothing about the written product is
+mysterious. Undefined calibration entries arrive as NaN and are zeroed on the way
+out, which is what `nan_to_num` below mirrors.
+
+```{python}
+written = read_product(product.fits_path)
+
+int_time = float(inputs.header["INT_TIME"])
+counts_per_sec = inputs.raw_counts.astype(np.float64) / int_time
+expected = np.nan_to_num(counts_per_sec * inputs.cal_factor[:, :, np.newaxis]).astype(np.float32)
+
+print("shapes match :", written.cube.shape == expected.shape)
+print("values match :", np.array_equal(written.cube, expected))
+```
+
+## What changes with real data
+
+Only the first cell of section 1. `SyntheticSource()` becomes a source that reads
+the science arrays from a PDS product and merges in the externally computed
+metadata and backplanes, and `calibration="stored"` becomes `"pyuvis"`. Sections
+3 through 5 stay exactly as they are.
+
