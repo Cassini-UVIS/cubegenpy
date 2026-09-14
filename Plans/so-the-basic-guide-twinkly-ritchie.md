@@ -14,9 +14,9 @@ decisions (confirmed with the PI):
 - **API = a class-based `CubeBuilder`** you configure, then call `.build()`.
 - **Geometry is always external input, never computed** (the IDL SPICE
   `GEOMETER_ENGINE` per-pixel loop is dropped entirely).
-- **No Showalter geometry data exists yet** → exercise FITS-building with
-  **synthetic/random data** (reuse `demo.make_synthetic_product`). The real
-  production pyuvis+Showalter source is a future seam, not built now.
+- **No metadata or backplane payload is available yet** → exercise FITS-building
+  with **synthetic/random data** (reuse `demo.make_synthetic_product`). The real
+  production source is a future seam, not built now.
 - **Recalibration (user-time), as a start, changes ONLY the background-subtraction
   offset.** Read RAW_COUNTS + stored CAL_FACTOR + geometry + header back from a
   downloaded FITS, apply a new background offset, rewrite. No port of the IDL
@@ -50,8 +50,8 @@ so real pyuvis/Spica calibration models drop in later without touching the core.
 - `c9b33ab` — docs review page + dark-mode inline-code fix.
 - `17ce2cd` — docs/design.qmd + this plan file.
 
-**Next phase (deferred seams, see bottom):** `PyuvisSource` (real PDS fetch +
-Showalter geometry ingest, blocked on geometry format) and `SpicaCalModel` (real
+**Next phase (deferred seams, see bottom):** `PyuvisSource` (real PDS read +
+metadata/backplane merge) and `SpicaCalModel` (real
 stellar-calibration chain). The `Source` and `CalModel` Protocols are the drop-in
 points. `build.py:build_cube` still raises `NotImplementedError` for the
 production signature by design (no `PyuvisSource` yet).
@@ -224,7 +224,16 @@ Run: `cd code/cubegenpy && pip install -e ".[dev]" && make test` (or `pytest`).
 
 ## Explicitly deferred (seams left open, not built now)
 
-- `PyuvisSource` (fetch real PDS product + ingest Showalter geometry folder) — blocked on Showalter's format, which doesn't exist yet.
+- `PyuvisSource` (read a real PDS product + merge the externally-computed metadata and backplanes).
+
+  > **Correction, 2026-09-14.** This was recorded as *blocked on Showalter's geometry
+  > format*. That framing was wrong on two counts. Showalter's machinery computes the
+  > **metadata and backplanes**, not a geometry folder, and the source is not blocked:
+  > the science arrays can be read from PDS3 through pyuvis today, with the new,
+  > metadata-less PDS4 conversion of the UVIS archive as a later swap behind the same
+  > reader seam. Two creation streams are intended: archive creation (metadata and
+  > backplanes merged with raw data, metadata feeding calibration, default calibration,
+  > final FITS) and the user-time recalibration path already built here.
 - `SpicaCalModel` / real integration of `pyuvis.calib.steffl`+`greg` and the IDL
   `Get_UVIS_calibration` chain — the calibration-observation extension work. The
   `CalModel` Protocol is the drop-in point. **This is the natural next phase after

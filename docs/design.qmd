@@ -21,7 +21,7 @@ Locked decisions (confirmed with the PI):
 - **API = a class-based `CubeBuilder`** you configure, then call `.build()`.
 - **Geometry is always external input, never computed** — the IDL SPICE
   `GEOMETER_ENGINE` per-pixel loop is dropped entirely.
-- **No Showalter geometry data exists yet** → exercise FITS-building with
+- **No metadata or backplane payload is available yet** → exercise FITS-building with
   **synthetic data** (reuse `demo.make_synthetic_product`).
 - **Recalibration (user-time), as a start, changes ONLY the background-subtraction
   offset.** No port of the IDL `Get_UVIS_calibration` is needed now.
@@ -182,8 +182,9 @@ the offset (`cube2 − cube1 == −offset × cal_factor`, everything else unchan
 
 ## Explicitly deferred (seams left open)
 
-- `PyuvisSource` (real PDS fetch + Showalter geometry ingest) — blocked on the
-  Showalter folder format, which doesn't exist yet.
+- `PyuvisSource` (read a real PDS product + merge the externally-computed
+  metadata and backplanes). Not blocked: science data can come from PDS3 via
+  pyuvis now, with the new PDS4 conversion as a later swap behind the same seam.
 - `SpicaCalModel` / real integration of `pyuvis.calib.steffl`+`greg` and the IDL
   `Get_UVIS_calibration` chain — the calibration-observation extension work. **The
   natural next phase after the skeleton lands.**

@@ -12,7 +12,7 @@ toc-depth: 3
 A single document that answers two questions for anyone reading the code:
 
 1. **For each `.pro` file in the IDL `cube_generator` — what's the Python plan?** Port, replace with a pre-existing `pyuvis` capability, drop because it's GUI / IDL-specific, or defer to a later phase?
-2. **What does cubegenpy own vs. delegate?** Specifically: data I/O is delegated to `pyuvis`, geometry is provided as input by the upstream pipeline (Mark Showalter's backplanes), and SPICE kernel handling lives outside this tool.
+2. **What does cubegenpy own vs. delegate?** Specifically: data I/O is delegated to `pyuvis`, metadata and backplanes are provided as input by the upstream pipeline (Mark Showalter's machinery), and SPICE kernel handling lives outside this tool.
 
 Source of the IDL files being translated:
 `~/Dropbox/Documents/01_projects/uvis_pdart/code/tools/cube_generator/`

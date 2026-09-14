@@ -11,9 +11,12 @@ OO core supports:
 * :class:`FitsReadbackSource` — read one of our own FITS products back in (for
   recalibration), delegating to :func:`cubegenpy.fitsio.read_product`.
 
-The real-data ``PyuvisSource`` (fetch a PDS product + ingest the Showalter
-geometry folder) is a deliberate future seam — blocked on the geometry format,
-not built here.
+The real-data ``PyuvisSource`` (read the science arrays from a PDS product and
+merge in the externally-computed metadata and backplanes) is a deliberate future
+seam, not built here. It is *not* blocked: the science half reads PDS3 through
+pyuvis today, and the metadata and backplanes arrive as an injected payload
+computed by Showalter's pipeline. The new PDS4 conversion of the UVIS archive is
+a later swap behind the same seam.
 """
 
 from __future__ import annotations

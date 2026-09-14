@@ -140,14 +140,19 @@ class PyuvisCalModel:
 
     Will read the archived PDS cal matrix via :mod:`pyuvis` (``UVPDS`` / cal
     matrix x ``CORE_MULTIPLIER`` -> kR). Thin glue; only exercised once real PDS
-    data is wired (blocked on the Showalter geometry format). pyuvis is imported
-    lazily so the rest of the core has no hard pyuvis/cal-data dependency.
+    data is wired through ``PyuvisSource``. pyuvis is imported lazily so the rest
+    of the core has no hard pyuvis/cal-data dependency.
+
+    Open question (2026-09-14): the archive stream is meant to take calibration
+    input from the new metadata as well as from the PDS cal matrix. Which
+    quantities come from where is not yet settled, so this may grow a second
+    input rather than staying pure pyuvis glue.
     """
 
     def cal_factor(self, inputs: "ProductInputs") -> np.ndarray:
         raise NotImplementedError(
-            "PyuvisCalModel needs the real pyuvis PDS cal-matrix wiring, which is "
-            "blocked on the Showalter geometry source. Use StoredCalModel "
+            "PyuvisCalModel needs the real pyuvis PDS cal-matrix wiring, which "
+            "arrives with PyuvisSource. Use StoredCalModel "
             "(calibration='stored') for the FITS-readback/recalibration path."
         )
 

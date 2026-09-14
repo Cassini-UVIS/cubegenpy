@@ -5,8 +5,9 @@ plus a :class:`~cubegenpy.sources.Source`
 (:class:`~cubegenpy.sources.SyntheticSource` for synthetic builds,
 :class:`~cubegenpy.sources.FitsReadbackSource` for recalibration). This module
 keeps the original functional ``build_cube`` signature for the *production*
-path — fetch a real PDS product via pyuvis + ingest externally-computed
-geometry — which is not wired yet (blocked on the Showalter geometry format).
+path — read the science arrays from a real PDS product via pyuvis and merge in
+the externally-computed metadata and backplanes — which is not wired yet, simply
+because ``PyuvisSource`` is unbuilt.
 
 ``CubeProduct`` is re-exported from :mod:`cubegenpy.product`.
 """
@@ -69,8 +70,8 @@ def build_cube(
     Raises
     ------
     NotImplementedError
-        The production ``PyuvisSource`` (fetch real PDS product + ingest the
-        Showalter geometry folder) is not built yet. Use
+        The production ``PyuvisSource`` (read a real PDS product + merge the
+        externally-computed metadata and backplanes) is not built yet. Use
         :class:`cubegenpy.builder.CubeBuilder` with
         :class:`~cubegenpy.sources.SyntheticSource` or
         :class:`~cubegenpy.sources.FitsReadbackSource` for the working paths.
@@ -81,8 +82,8 @@ def build_cube(
     BuildConfig(calibration=calibration, write_pds4_label=write_pds4_label)
 
     raise NotImplementedError(
-        "build_cube's production path needs PyuvisSource (real PDS fetch + "
-        "Showalter geometry ingest), which is blocked on the geometry format. "
+        "build_cube's production path needs PyuvisSource (real PDS read + "
+        "metadata/backplane merge), which is not built yet. "
         "Use CubeBuilder(SyntheticSource(...)) or "
         "CubeBuilder(FitsReadbackSource(path), config=BuildConfig(calibration="
         "'stored')) for the working build / recalibration paths."
