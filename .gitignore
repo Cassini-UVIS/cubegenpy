@@ -66,5 +66,10 @@ _freeze/
 # Jupyter
 .ipynb_checkpoints/
 
+# Artefacts written by the tutorial notebooks
+tutorials/products/
+tutorials/skeletons/
+
 # OS
 .DS_Store
+great-docs/

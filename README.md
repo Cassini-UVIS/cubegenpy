@@ -15,7 +15,7 @@ input.
 
 ## Status
 
-**Scaffolding only.** See [`docs/index.qmd`](./docs/index.qmd) for the
+**Scaffolding only.** See [the design notes](https://cassini-uvis.github.io/cubegenpy/user-guide/) for the
 IDL→Python translation map, the architectural delegation to `pyuvis`,
 and the phase plan.
 
@@ -75,7 +75,7 @@ Mirrors Mark Showalter's 2026-02 proposal — see
 
 ## Documentation
 
-- [`docs/index.qmd`](./docs/index.qmd) — full IDL → Python translation
+- [Design notes](https://cassini-uvis.github.io/cubegenpy/user-guide/) — full IDL → Python translation
   map, architectural delegation, and phase plan. Renders as a Quarto
   page; will become the homepage of the docs site once the Quarto
   site is wired up (same pattern as `pyuvis`).

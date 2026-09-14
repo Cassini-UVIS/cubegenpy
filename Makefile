@@ -7,10 +7,10 @@ test:
 	pytest
 
 docs:
-	cd docs && python -m quartodoc build && cd .. && quarto render docs
+	great-docs build
 
 serve:
-	quarto preview docs
+	great-docs preview
 
 clean:
-	rm -rf dist build *.egg-info docs/_build docs/reference docs/.quarto
+	rm -rf dist build *.egg-info great-docs/

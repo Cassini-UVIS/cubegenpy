@@ -1,0 +1,276 @@
+---
+title: Writing a metadata skeleton
+jupyter: python3
+---
+
+
+This walks through producing a **geometry-complete, science-empty** UVIS PDS4
+FITS product: header, all four geometry HDUs, kernels and wavelengths filled
+in, with only the science arrays left as placeholders. Calibration fills those
+in afterwards without disturbing anything written here.
+
+The point of doing it this way is that the handoff format stops being a Python
+dictionary that has to be agreed and validated, and becomes the archive product
+itself — self-describing, openable with any FITS tool, and already the thing
+being delivered.
+
+Nothing here needs network access or real data.
+
+
+```{python}
+import numpy as np
+from astropy.io import fits
+
+from cubegenpy import (
+    SubsamplingPolicy,
+    check_skeleton,
+    geometry_contract,
+    smear_pixels,
+    write_skeleton,
+)
+from cubegenpy.writer import Dims
+```
+
+## 1. Fix the dimensions
+
+FITS allocates array space on write, so the dimensions have to be final before
+anything is written — the science arrays that get filled later must be the
+right size from the start.
+
+| | |
+|---|---|
+| `NX` | wavelengths, from `IMG_XMAX - IMG_XMIN + 1` |
+| `NY` | slit samples, already reduced by `IMG_YBIN` in PDS3 |
+| `NZ` | readouts |
+| `NT` | sub-samples within one integration — see below |
+
+### Choosing NT
+
+v2 fixes the floor at 3 (begin, middle, end) and leaves the rest open: *"For
+long, significantly smeared products, finer sampling in T will be provided …
+the precise details are still TBD."*
+
+That TBD is expressed as a policy you can set, rather than a constant. The
+default rule: place sample points no more than `pixels_per_subsample` apart
+along the smear track, never below `minimum`, never above `maximum`.
+
+`recommend()` returns a number — it does not impose it. You stay free to pass
+whatever `NT` you like in `Dims`; the policy only refuses values outside its
+bounds.
+
+```{python}
+# How far does the FOV move across the slit during one integration?
+smear = smear_pixels(slew_rate_deg_s=0.01, integration_s=240.0, pixel_scale_deg=0.25)
+print(f"smear = {smear:.1f} pixels")
+
+for label, policy in [
+    ("default", SubsamplingPolicy()),
+    ("finer", SubsamplingPolicy(pixels_per_subsample=0.5, maximum=65)),
+    ("coarser", SubsamplingPolicy(pixels_per_subsample=4.0)),
+]:
+    print(f"  {label:8} -> NT = {policy.recommend(smear):3d}   [{policy.describe()}]")
+```
+
+The cost of a finer policy is linear: every backplane column is
+`5 x NY x NZ x NT` floats, so doubling `NT` doubles the geometry volume. That
+is the trade-off the `maximum` guard exists for.
+
+Note that `NT` itself is **not** written as a header keyword — it is the last
+axis of every backplane `TDIM`, and repeating it in a keyword would let the two
+disagree. Only the *rule* is recorded, in `NT_RULE`.
+
+```{python}
+policy = SubsamplingPolicy()
+dims = Dims(NX=1024, NY=32, NZ=180, NT=policy.recommend(smear))
+dims
+```
+
+## 2. Ask what shapes are expected
+
+`geometry_contract()` prints every column the writer expects, with its array
+shape in **numpy** order and its FITS `TDIM` alongside. Those two are reversed
+relative to each other, which is the easiest thing to get wrong here, so both
+are shown.
+
+The contract is generated from the data-definition workbook, so it always
+matches whatever the current layout says — it cannot drift from the writer.
+
+```{python}
+contract = geometry_contract(dims)
+print("\n".join(contract.splitlines()[:24]))
+print("...")
+```
+
+## 3. Supply the geometry
+
+Geometry is a dict keyed by HDU name, then by column name. Anything you leave
+out is written as zeros and reported as unfilled — so a partial delivery is
+still a valid, inspectable file rather than an error.
+
+Two row conventions matter:
+
+- `SC_GEOM` has one row per body in `bodies` (Saturn is added automatically if
+  absent, per v2 p.9).
+- `BODY_GEOM` has one row per body in `resolved_bodies` — the subset large
+  enough to resolve, since a backplane for an unresolved body would be all NaN.
+
+Below only a couple of columns are filled, to show what "partial" looks like.
+
+```{python}
+bodies = ["SATURN", "TITAN"]
+resolved_bodies = ["TITAN"]
+
+# time-series cell: (nrows, NT, NZ)      <- reversed TDIM (NZ, NT)
+# backplane cell:   (nrows, NT, NZ, NY, 5) <- reversed TDIM (5, NY, NZ, NT)
+ts = (len(bodies), dims.NT, dims.NZ)
+bp = (len(resolved_bodies), dims.NT, dims.NZ, dims.NY, 5)
+
+geometry = {
+    "SC_GEOM": {
+        "SUB_SC_LAT_CENTRIC": np.full(ts, -12.5, dtype=np.float32),
+        "SUB_SC_LON": np.full(ts, 274.0, dtype=np.float32),
+    },
+    "BODY_GEOM": {
+        "LAT_CENTRIC": np.full(bp, 42.0, dtype=np.float32),
+    },
+    "GENERAL_GEOM": {
+        "TIME_ET": np.full((1, dims.NT, dims.NZ), 4.1428e8, dtype=np.float64),
+    },
+}
+{k: {c: v.shape for c, v in cols.items()} for k, cols in geometry.items()}
+```
+
+## 4. Write the skeleton
+
+**The header values below are illustrative.** `PROD_ID`, `TARGET`,
+`INT_TIME` and the `IMG_*` window bounds are plausible-looking placeholders
+chosen to make the example concrete — they are not read from a real product,
+and the geometry arrays above are constants rather than computed backplanes.
+
+In production these come from the PDS3 label: `IMG_XMIN`/`IMG_XMAX` from
+`UL_CORNER_BAND`/`LR_CORNER_BAND`, `IMG_YMIN`/`IMG_YMAX` from the matching
+`_LINE` keywords, `INT_TIME` from `INTEGRATION_DURATION`, and so on. The
+writer does not invent or validate them — whatever is passed is what lands in
+the file, so the mapping from label to keyword is the caller's to get right.
+
+Keywords not supplied are simply omitted rather than defaulted, which is why a
+partial header still produces a valid file.
+
+```{python}
+header = {
+    "PROD_ID": "EUV2002_198_03_26",
+    "CHANNEL": "EUV",
+    "TARGET": "TITAN",
+    "INT_TIME": 240.0,
+    "IMG_XMIN": 0,
+    "IMG_XMAX": 1023,
+    "IMG_YMIN": 16,
+    "IMG_YMAX": 47,
+}
+
+path = write_skeleton(
+    "skeletons",
+    "EUV2002_198_03_26",
+    dims=dims,
+    header=header,
+    geometry=geometry,
+    kernels=[("naif0012.tls", "LSK"), ("cpck14Oct2011.tpc", "PCK")],
+    bodies=bodies,
+    resolved_bodies=resolved_bodies,
+    subsampling=policy,
+)
+path
+```
+
+## 5. Check what landed
+
+`check_skeleton()` reports which columns took data and which are still zeros —
+the answer to *"did my arrays go where I meant them to?"* without opening the
+file by hand.
+
+```{python}
+report = check_skeleton(path)
+print(f"PIPESTAT   : {report.pipestat}")
+print(f"dims       : NX={report.dims.NX} NY={report.dims.NY} "
+      f"NZ={report.dims.NZ} NT={report.dims.NT}")
+print(f"bodies     : {report.bodies}")
+print(f"resolved   : {report.resolved_bodies}")
+print(f"science    : {report.science_filled or '(none — correct for a skeleton)'}")
+print(f"geometry   : {len(report.filled_columns)} filled, "
+      f"{len(report.unfilled_columns)} unfilled")
+print(f"filled     : {report.filled_columns}")
+```
+
+## 6. What the file looks like
+
+The HDU list is the full v2 layout, in order, generated from the workbook.
+
+```{python}
+with fits.open(path) as hdul:
+    hdul.info()
+```
+
+```{python}
+with fits.open(path) as hdul:
+    hdr = hdul[0].header
+    for kw in ("PROD_ID", "CHANNEL", "TARGET", "PIPESTAT", "NT_RULE"):
+        print(f"{kw:9} = {hdr[kw]!r}")
+    print()
+    # NT is stated once, in the backplane TDIM -- not repeated as a keyword.
+    body = hdul["BODY_GEOM"]
+    idx = body.columns.names.index("LAT_CENTRIC") + 1
+    print(f"BODY_GEOM TDIM{idx} = {body.header[f'TDIM{idx}']}   (5, NY, NZ, NT)")
+```
+
+Note the placeholders: NaN in the float arrays, never zero. A zero flux is a
+legal value and would let an unfilled product pass unnoticed; NaN announces
+itself. `PIPESTAT = GEOMETRY_ONLY` marks the file as not yet science, and the
+calibration stage refuses to treat it as finished until it promotes that to
+`CALIBRATED`.
+
+```{python}
+with fits.open(path) as hdul:
+    print("PRIMARY all-NaN     :", bool(np.all(np.isnan(hdul[0].data))))
+    print("BACKGROUND all-NaN  :", bool(np.all(np.isnan(hdul["BACKGROUND"].data))))
+    print("RAW_COUNTS BLANK    :", hdul["RAW_COUNTS"].header["BLANK"])
+```
+
+## 7. What happens next
+
+Calibration reads the skeleton back, fills the science arrays and rewrites,
+carrying every geometry HDU and header keyword through untouched:
+
+```python
+from cubegenpy import read_product, calibrated_header
+from cubegenpy import writer
+
+inputs = read_product(skeleton_path)
+kwargs = inputs.as_writer_kwargs() | {
+    "cube": calibrated_cube,
+    "header": calibrated_header(inputs.header),   # PIPESTAT -> CALIBRATED
+}
+writer.build_hdulist(**kwargs).writeto(final_path)
+```
+
+The primary header comes through byte-identical apart from `PIPESTAT`, and the
+geometry tables compare equal column by column — there is a test asserting
+exactly that (`tests/test_skeleton.py::test_stage2_preserves_everything_stage1_wrote`).
+
+## Where the layout comes from
+
+Everything above — HDU order, column names, dtypes, `TDIM`s, header keywords —
+is read from `UVIS_data_definition_v0.5.xlsx`, shipped inside the package. The
+writer walks that workbook; it has no layout of its own. So correcting the
+format is a spreadsheet edit, not a code change:
+
+```{python}
+from cubegenpy import load_template
+
+t = load_template()
+print(t)
+print(f"\nworkbook: {t.path}\n")
+for spec in t.hdu_specs():
+    n = len(spec.columns)
+    print(f"  {spec.name:<13} {spec.xtension:<12} {f'{n} fields' if n else ''}")
+```
+

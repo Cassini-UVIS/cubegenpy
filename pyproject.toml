@@ -41,7 +41,7 @@ Repository = "https://github.com/Cassini-UVIS/cubegenpy"
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "build", "twine"]
-docs = ["quartodoc>=0.11.1", "griffe>=1.5,<2", "jupyter", "nbformat"]
+docs = ["jupyter", "nbformat"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cubegenpy"]
